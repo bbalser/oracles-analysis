@@ -1,8 +1,5 @@
-use std::str::FromStr;
-
 use file_store::{traits::MsgDecode, wifi_heartbeat::WifiHeartbeatIngestReport, FileType};
 
-use helium_crypto::PublicKeyBinary;
 use sqlx::{Pool, Postgres};
 
 use crate::{DbTable, Decode, Persist, ToPrefix};
@@ -50,9 +47,7 @@ impl DbTable for FileTypeWifiHeartbeatIngestReport {
 impl Persist for WifiHeartbeatIngestReport {
     async fn save(self: Box<Self>, pool: &Pool<Postgres>) -> anyhow::Result<()> {
         let uuid = uuid::Uuid::from_slice(&self.report.coverage_object)?;
-        let pk = PublicKeyBinary::from_str("1trSusekCJE9aQ7zf5t7viNKtKiAh4E4qnVLc8ZmKmKvBLUgnSbesrsLhVqXXBVm65BnWUHLpjYQUAvU1V8VUNjghCiqBvaVygtCouS1zq47X5AN5bNk6Y6tDgSMVJoA1NxuAyNeNfBCYGJtKMkoHnN2ay6ofaDoJRKUCkVbs4E3cgxKEixK7Vn1aq9L3vLaDg33WXitGQSQQ6qhwkekKmBz1b8wv7dCLvDR7KRzR2aMps2zD8ubcLCYtN9LGdu5jkwHy6zg4aCJ5LqXXgBk5EAisw4m5aJdtFGjcj1iWMTXzur4Mwa1R9KHUccJz8hESrExpi6y7xydjNRPHkWLgd1Mx4VWyZuhaaZykHstn9hMRc")?;
-        if self.report.pubkey == pk {
-            sqlx::query(r#"
+        sqlx::query(r#"
             INSERT INTO mobile_wifi_ingest_reports(received_timestamp, hotspot_key, timestamp, lat, lon, location_validation_timestamp, operation_mode, coverage_object)
             VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
             "#)
@@ -68,8 +63,5 @@ impl Persist for WifiHeartbeatIngestReport {
             .await
             .map(|_| ())
             .map_err(anyhow::Error::from)
-        } else {
-            Ok(())
-        }
     }
 }

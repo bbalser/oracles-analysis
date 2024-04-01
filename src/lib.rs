@@ -16,12 +16,14 @@ use wifi_heartbeat_ingest_report::FileTypeWifiHeartbeatIngestReport;
 mod boosted_hex_update;
 mod cbrs_heartbeat_ingest;
 mod cell_speedtest_ingest;
+pub mod commands;
 mod coverage_object;
+mod files_processed;
 mod iot_reward_share;
 mod mobile_reward_share;
 mod oracle_boosting;
 mod radio_thresholds;
-pub mod validated_heartbeat;
+mod validated_heartbeat;
 mod wifi_heartbeat_ingest_report;
 
 #[derive(Debug, Clone, ValueEnum)]
@@ -107,7 +109,7 @@ pub fn to_datetime_ms(timestamp: u64) -> DateTime<Utc> {
     Utc.timestamp_millis_opt(timestamp as i64).single().unwrap()
 }
 
-fn to_optional_datetime(timestamp: u64) -> Option<DateTime<Utc>> {
+pub fn to_optional_datetime(timestamp: u64) -> Option<DateTime<Utc>> {
     if timestamp == 0 {
         None
     } else {

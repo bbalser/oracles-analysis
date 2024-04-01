@@ -15,9 +15,7 @@ pub struct FileTypeRadioThreshold {}
 
 impl Decode for FileTypeRadioThreshold {
     fn decode(&self, buf: bytes::BytesMut) -> anyhow::Result<Box<dyn Persist>> {
-        Ok(Box::new(
-            VerifiedInvalidatedRadioThresholdIngestReportV1::decode(buf)?,
-        ))
+        Ok(Box::new(VerifiedRadioThresholdIngestReportV1::decode(buf)?))
     }
 }
 
@@ -54,10 +52,9 @@ impl Persist for VerifiedRadioThresholdIngestReportV1 {
     async fn save(self: Box<Self>, pool: &Pool<Postgres>) -> anyhow::Result<()> {
         let report = self.clone().report.unwrap().report.unwrap();
         let pubkey = PublicKey::try_from(report.hotspot_pubkey)?.to_string();
-        let pubkey_bytes = bs58::decode(&pubkey).into_vec()?;
         sqlx::query(r#"
-                INSERT INTO radio_thresholds(received_timestamp, status, hotspot_key, cbsd_id, validated, threshold_timestamp, pubkey_bytes)
-                VALUES($1,$2,$3,$4,$5,$6,$7)
+                INSERT INTO radio_thresholds(received_timestamp, status, hotspot_key, cbsd_id, validated, threshold_timestamp)
+                VALUES($1,$2,$3,$4,$5,$6)
             "#)
             .bind(to_datetime_ms(self.clone().report.unwrap().received_timestamp))
             .bind(self.status().as_str_name())
@@ -65,7 +62,6 @@ impl Persist for VerifiedRadioThresholdIngestReportV1 {
             .bind(report.cbsd_id)
             .bind(true)
             .bind(to_datetime(report.threshold_timestamp))
-            .bind(pubkey_bytes)
             .execute(pool)
             .await
             .map(|_| ())
@@ -117,10 +113,9 @@ impl Persist for VerifiedInvalidatedRadioThresholdIngestReportV1 {
     async fn save(self: Box<Self>, pool: &Pool<Postgres>) -> anyhow::Result<()> {
         let report = self.clone().report.unwrap().report.unwrap();
         let pubkey = PublicKey::try_from(report.hotspot_pubkey)?.to_string();
-        let pubkey_bytes = bs58::decode(&pubkey).into_vec()?;
         sqlx::query(r#"
-                INSERT INTO radio_thresholds(received_timestamp, status, hotspot_key, cbsd_id, validated, threshold_timestamp, pubkey_bytes)
-                VALUES($1,$2,$3,$4,$5,$6,$7)
+                INSERT INTO radio_thresholds(received_timestamp, status, hotspot_key, cbsd_id, validated, threshold_timestamp)
+                VALUES($1,$2,$3,$4,$5,$6)
             "#)
             .bind(to_datetime_ms(self.clone().report.unwrap().received_timestamp))
             .bind(self.status().as_str_name())
@@ -128,7 +123,6 @@ impl Persist for VerifiedInvalidatedRadioThresholdIngestReportV1 {
             .bind(report.cbsd_id)
             .bind(false)
             .bind(to_datetime_ms(report.timestamp))
-            .bind(pubkey_bytes)
             .execute(pool)
             .await
             .map(|_| ())

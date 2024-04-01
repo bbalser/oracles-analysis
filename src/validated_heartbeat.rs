@@ -74,3 +74,23 @@ impl Persist for ValidatedHeartbeat {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use h3o::{CellIndex, LatLng, Resolution};
+
+    #[test]
+    fn brian() -> anyhow::Result<()> {
+        let assert_location: LatLng = CellIndex::try_from(631711284849186303)?.into();
+
+        let location: LatLng = LatLng::new(25.791909, -80.149107)?;
+
+        dbg!(assert_location.distance_m(location).round());
+
+        let snapped_location: LatLng = location.to_cell(Resolution::Twelve).into();
+
+        dbg!(assert_location.distance_m(snapped_location).round());
+
+        Ok(())
+    }
+}

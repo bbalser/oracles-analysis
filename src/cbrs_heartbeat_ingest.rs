@@ -51,9 +51,7 @@ impl DbTable for FileTypeCbrsHeartbeatIngestReport {
 #[async_trait::async_trait]
 impl Persist for CbrsHeartbeatIngestReport {
     async fn save(self: Box<Self>, pool: &Pool<Postgres>) -> anyhow::Result<()> {
-        let pk = PublicKeyBinary::from_str("112RKrA2xhviTDwDNERubtSj2T6289G3vhkDK1B9WemgxMDURoWq")?;
-        if self.report.pubkey == pk {
-            sqlx::query(
+        sqlx::query(
                     r#"
                         INSERT INTO mobile_cbrs_ingest_reports(hotspot_key, hotspot_type, cell_id, received_timestamp, timestamp, lat, lon, operation_mode, cbsd_category, cbsd_id, coverage_object)
                         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
@@ -74,8 +72,5 @@ impl Persist for CbrsHeartbeatIngestReport {
                 .await
                 .map(|_| ())
                 .map_err(anyhow::Error::from)
-        } else {
-            Ok(())
-        }
     }
 }
