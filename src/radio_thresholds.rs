@@ -1,4 +1,5 @@
-use file_store::FileType;
+use file_store::{BytesMutStream, FileType};
+use futures::TryStreamExt;
 use helium_crypto::PublicKey;
 use helium_proto::{
     services::poc_mobile::{
@@ -6,16 +7,25 @@ use helium_proto::{
     },
     Message,
 };
-use sqlx::{Pool, Postgres};
+use sqlx::{Pool, Postgres, QueryBuilder};
 
-use crate::{to_datetime, to_datetime_ms, DbTable, Decode, Persist, ToPrefix};
+use crate::{to_datetime, to_datetime_ms, DbTable, Decode, Insertable, ToPrefix};
 
 #[derive(Clone, Debug)]
 pub struct FileTypeRadioThreshold {}
 
+#[async_trait::async_trait]
 impl Decode for FileTypeRadioThreshold {
-    fn decode(&self, buf: bytes::BytesMut) -> anyhow::Result<Box<dyn Persist>> {
-        Ok(Box::new(VerifiedRadioThresholdIngestReportV1::decode(buf)?))
+    async fn decode(&self, stream: BytesMutStream) -> anyhow::Result<Box<dyn Insertable>> {
+        let reports = stream
+            .map_err(anyhow::Error::from)
+            .and_then(|buf| async move {
+                VerifiedRadioThresholdIngestReportV1::decode(buf).map_err(anyhow::Error::from)
+            })
+            .try_collect::<Vec<_>>()
+            .await?;
+
+        Ok(Box::new(reports))
     }
 }
 
@@ -48,35 +58,53 @@ impl DbTable for FileTypeRadioThreshold {
 }
 
 #[async_trait::async_trait]
-impl Persist for VerifiedRadioThresholdIngestReportV1 {
-    async fn save(self: Box<Self>, pool: &Pool<Postgres>) -> anyhow::Result<()> {
-        let report = self.clone().report.unwrap().report.unwrap();
-        let pubkey = PublicKey::try_from(report.hotspot_pubkey)?.to_string();
-        sqlx::query(r#"
-                INSERT INTO radio_thresholds(received_timestamp, status, hotspot_key, cbsd_id, validated, threshold_timestamp)
-                VALUES($1,$2,$3,$4,$5,$6)
-            "#)
-            .bind(to_datetime_ms(self.clone().report.unwrap().received_timestamp))
-            .bind(self.status().as_str_name())
-            .bind(pubkey)
-            .bind(report.cbsd_id)
-            .bind(true)
-            .bind(to_datetime(report.threshold_timestamp))
-            .execute(pool)
-            .await
-            .map(|_| ())
-            .map_err(anyhow::Error::from)
+impl Insertable for Vec<VerifiedRadioThresholdIngestReportV1> {
+    async fn insert(&self, db: &Pool<Postgres>) -> anyhow::Result<()> {
+        const NUM_IN_BATCH: usize = (u16::MAX / 6) as usize;
+
+        for chunk in self.chunks(NUM_IN_BATCH) {
+            let mut qb = QueryBuilder::new("INSERT INTO radio_thresholds(received_timestamp, status, hotspot_key, cbsd_id, validated, threshold_timestamp)");
+
+            qb.push_values(chunk, |mut b, top_report| {
+                let report = top_report.clone().report.unwrap().report.unwrap();
+                let pubkey = PublicKey::try_from(report.hotspot_pubkey)
+                    .unwrap()
+                    .to_string();
+
+                b.push_bind(to_datetime_ms(
+                    top_report.clone().report.unwrap().received_timestamp,
+                ))
+                .push_bind(top_report.status().as_str_name())
+                .push_bind(pubkey)
+                .push_bind(report.cbsd_id)
+                .push_bind(true)
+                .push_bind(to_datetime(report.threshold_timestamp));
+            })
+            .build()
+            .execute(db)
+            .await?;
+        }
+
+        Ok(())
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct FileTypeInvalidatedRadioThreshold {}
 
+#[async_trait::async_trait]
 impl Decode for FileTypeInvalidatedRadioThreshold {
-    fn decode(&self, buf: bytes::BytesMut) -> anyhow::Result<Box<dyn Persist>> {
-        Ok(Box::new(
-            VerifiedInvalidatedRadioThresholdIngestReportV1::decode(buf)?,
-        ))
+    async fn decode(&self, stream: BytesMutStream) -> anyhow::Result<Box<dyn Insertable>> {
+        let reports = stream
+            .map_err(anyhow::Error::from)
+            .and_then(|buf| async move {
+                VerifiedInvalidatedRadioThresholdIngestReportV1::decode(buf)
+                    .map_err(anyhow::Error::from)
+            })
+            .try_collect::<Vec<_>>()
+            .await?;
+
+        Ok(Box::new(reports))
     }
 }
 
@@ -109,23 +137,33 @@ impl DbTable for FileTypeInvalidatedRadioThreshold {
 }
 
 #[async_trait::async_trait]
-impl Persist for VerifiedInvalidatedRadioThresholdIngestReportV1 {
-    async fn save(self: Box<Self>, pool: &Pool<Postgres>) -> anyhow::Result<()> {
-        let report = self.clone().report.unwrap().report.unwrap();
-        let pubkey = PublicKey::try_from(report.hotspot_pubkey)?.to_string();
-        sqlx::query(r#"
-                INSERT INTO radio_thresholds(received_timestamp, status, hotspot_key, cbsd_id, validated, threshold_timestamp)
-                VALUES($1,$2,$3,$4,$5,$6)
-            "#)
-            .bind(to_datetime_ms(self.clone().report.unwrap().received_timestamp))
-            .bind(self.status().as_str_name())
-            .bind(pubkey)
-            .bind(report.cbsd_id)
-            .bind(false)
-            .bind(to_datetime_ms(report.timestamp))
-            .execute(pool)
-            .await
-            .map(|_| ())
-            .map_err(anyhow::Error::from)
+impl Insertable for Vec<VerifiedInvalidatedRadioThresholdIngestReportV1> {
+    async fn insert(&self, db: &Pool<Postgres>) -> anyhow::Result<()> {
+        const NUM_IN_BATCH: usize = (u16::MAX / 6) as usize;
+
+        for chunk in self.chunks(NUM_IN_BATCH) {
+            let mut qb = QueryBuilder::new("INSERT INTO radio_thresholds(received_timestamp, status, hotspot_key, cbsd_id, validated, threshold_timestamp)");
+
+            qb.push_values(chunk, |mut b, top_report| {
+                let report = top_report.clone().report.unwrap().report.unwrap();
+                let pubkey = PublicKey::try_from(report.hotspot_pubkey)
+                    .unwrap()
+                    .to_string();
+
+                b.push_bind(to_datetime_ms(
+                    top_report.clone().report.unwrap().received_timestamp,
+                ))
+                .push_bind(top_report.status().as_str_name())
+                .push_bind(pubkey)
+                .push_bind(report.cbsd_id)
+                .push_bind(false)
+                .push_bind(to_datetime(report.timestamp));
+            })
+            .build()
+            .execute(db)
+            .await?;
+        }
+
+        Ok(())
     }
 }

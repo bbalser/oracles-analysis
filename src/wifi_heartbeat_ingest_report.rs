@@ -1,15 +1,27 @@
-use file_store::{traits::MsgDecode, wifi_heartbeat::WifiHeartbeatIngestReport, FileType};
+use file_store::{
+    traits::MsgDecode, wifi_heartbeat::WifiHeartbeatIngestReport, BytesMutStream, FileType,
+};
 
-use sqlx::{Pool, Postgres};
+use futures::TryStreamExt;
+use sqlx::{Pool, Postgres, QueryBuilder};
 
-use crate::{DbTable, Decode, Persist, ToPrefix};
+use crate::{DbTable, Decode, Insertable, ToPrefix};
 
 #[derive(Clone, Debug)]
 pub struct FileTypeWifiHeartbeatIngestReport {}
 
+#[async_trait::async_trait]
 impl Decode for FileTypeWifiHeartbeatIngestReport {
-    fn decode(&self, buf: bytes::BytesMut) -> anyhow::Result<Box<dyn Persist>> {
-        Ok(Box::new(WifiHeartbeatIngestReport::decode(buf)?))
+    async fn decode(&self, stream: BytesMutStream) -> anyhow::Result<Box<dyn Insertable>> {
+        let reports = stream
+            .map_err(anyhow::Error::from)
+            .and_then(|buf| async move {
+                WifiHeartbeatIngestReport::decode(buf).map_err(anyhow::Error::from)
+            })
+            .try_collect::<Vec<_>>()
+            .await?;
+
+        Ok(Box::new(reports))
     }
 }
 
@@ -44,24 +56,29 @@ impl DbTable for FileTypeWifiHeartbeatIngestReport {
 }
 
 #[async_trait::async_trait]
-impl Persist for WifiHeartbeatIngestReport {
-    async fn save(self: Box<Self>, pool: &Pool<Postgres>) -> anyhow::Result<()> {
-        let uuid = uuid::Uuid::from_slice(&self.report.coverage_object)?;
-        sqlx::query(r#"
-            INSERT INTO mobile_wifi_ingest_reports(received_timestamp, hotspot_key, timestamp, lat, lon, location_validation_timestamp, operation_mode, coverage_object)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-            "#)
-            .bind(self.received_timestamp)
-            .bind(self.report.pubkey.to_string())
-            .bind(self.report.timestamp)
-            .bind(self.report.lat)
-            .bind(self.report.lon)
-            .bind(self.report.location_validation_timestamp)
-            .bind(self.report.operation_mode)
-            .bind(uuid)
-            .execute(pool)
-            .await
-            .map(|_| ())
-            .map_err(anyhow::Error::from)
+impl Insertable for Vec<WifiHeartbeatIngestReport> {
+    async fn insert(&self, db: &Pool<Postgres>) -> anyhow::Result<()> {
+        const NUM_IN_BATCH: usize = (u16::MAX / 8) as usize;
+
+        for chunk in self.chunks(NUM_IN_BATCH) {
+            QueryBuilder::new("INSERT INTO mobile_wifi_ingest_reports(received_timestamp, hotspot_key, timestamp, lat, lon, location_validation_timestamp, operation_mode, coverage_object)")
+            .push_values(chunk, |mut b, report| {
+
+                let uuid = uuid::Uuid::from_slice(&report.report.coverage_object).expect("unable to create uuid");
+
+                b.push_bind(report.received_timestamp)
+                    .push_bind(report.report.pubkey.to_string())
+                    .push_bind(report.report.timestamp)
+                    .push_bind(report.report.lat)
+                    .push_bind(report.report.lon)
+                    .push_bind(report.report.location_validation_timestamp)
+                    .push_bind(report.report.operation_mode)
+                    .push_bind(uuid);
+            })
+            .build()
+            .execute(db)
+            .await?;
+        }
+        Ok(())
     }
 }

@@ -1,14 +1,26 @@
-use file_store::{speedtest::CellSpeedtestIngestReport, traits::MsgDecode, FileType};
+use file_store::{
+    speedtest::CellSpeedtestIngestReport, traits::MsgDecode, BytesMutStream, FileType,
+};
+use futures::TryStreamExt;
 use sqlx::{Pool, Postgres};
 
-use crate::{DbTable, Decode, Persist, ToPrefix};
+use crate::{DbTable, Decode, Insertable, ToPrefix};
 
 #[derive(Clone, Debug)]
 pub struct FileTypeCellSpeedtestIngestReport {}
 
+#[async_trait::async_trait]
 impl Decode for FileTypeCellSpeedtestIngestReport {
-    fn decode(&self, buf: bytes::BytesMut) -> anyhow::Result<Box<dyn Persist>> {
-        Ok(Box::new(CellSpeedtestIngestReport::decode(buf)?))
+    async fn decode(&self, stream: BytesMutStream) -> anyhow::Result<Box<dyn Insertable>> {
+        let reports = stream
+            .map_err(anyhow::Error::from)
+            .and_then(|buf| async move {
+                CellSpeedtestIngestReport::decode(buf).map_err(anyhow::Error::from)
+            })
+            .try_collect::<Vec<_>>()
+            .await?;
+
+        Ok(Box::new(reports))
     }
 }
 
@@ -42,25 +54,26 @@ impl DbTable for FileTypeCellSpeedtestIngestReport {
 }
 
 #[async_trait::async_trait]
-impl Persist for CellSpeedtestIngestReport {
-    async fn save(self: Box<Self>, pool: &Pool<Postgres>) -> anyhow::Result<()> {
-        sqlx::query(
-            r#"
+impl Insertable for Vec<CellSpeedtestIngestReport> {
+    async fn insert(&self, db: &Pool<Postgres>) -> anyhow::Result<()> {
+        for test in self {
+            sqlx::query(
+                r#"
                 INSERT INTO mobile_speedtest_ingest_reports(hotspot_key, serial, timestamp,
                     received_timestamp, upload_speed, download_speed, latency)
                 VALUES($1,$2,$3,$4,$5,$6,$7)
             "#,
-        )
-        .bind(self.report.pubkey.to_string())
-        .bind(self.report.serial)
-        .bind(self.report.timestamp)
-        .bind(self.received_timestamp)
-        .bind(self.report.upload_speed as i64)
-        .bind(self.report.download_speed as i64)
-        .bind(self.report.latency as i64)
-        .execute(pool)
-        .await
-        .map(|_| ())
-        .map_err(anyhow::Error::from)
+            )
+            .bind(test.report.pubkey.to_string())
+            .bind(&test.report.serial)
+            .bind(test.report.timestamp)
+            .bind(test.received_timestamp)
+            .bind(test.report.upload_speed as i64)
+            .bind(test.report.download_speed as i64)
+            .bind(test.report.latency as i64)
+            .execute(db)
+            .await?;
+        }
+        Ok(())
     }
 }

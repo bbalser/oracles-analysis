@@ -1,9 +1,16 @@
-use file_store::FileType;
+use file_store::{BytesMutStream, FileType};
+use futures::TryStreamExt;
 use helium_crypto::PublicKey;
-use helium_proto::{services::poc_mobile::{MobileRewardShare, mobile_reward_share}, Message};
-use sqlx::{postgres::{PgHasArrayType, PgTypeInfo}, Pool, Postgres};
+use helium_proto::{
+    services::poc_mobile::{mobile_reward_share, MobileRewardShare},
+    Message,
+};
+use sqlx::{
+    postgres::{PgHasArrayType, PgTypeInfo},
+    Pool, Postgres,
+};
 
-use crate::{to_datetime, DbTable, Decode, Persist, ToPrefix};
+use crate::{to_datetime, DbTable, Decode, Insertable, ToPrefix};
 
 #[derive(Debug, Clone, sqlx::Type)]
 #[sqlx(type_name = "boosted_hex")]
@@ -21,9 +28,18 @@ impl PgHasArrayType for BoostedHex {
 #[derive(Debug, Clone)]
 pub struct FileTypeMobileRewardShare {}
 
+#[async_trait::async_trait]
 impl Decode for FileTypeMobileRewardShare {
-    fn decode(&self, buf: bytes::BytesMut) -> anyhow::Result<Box<dyn Persist>> {
-        Ok(Box::new(MobileRewardShare::decode(buf)?))
+    async fn decode(&self, stream: BytesMutStream) -> anyhow::Result<Box<dyn Insertable>> {
+        let reports = stream
+            .map_err(anyhow::Error::from)
+            .and_then(
+                |buf| async move { MobileRewardShare::decode(buf).map_err(anyhow::Error::from) },
+            )
+            .try_collect::<Vec<_>>()
+            .await?;
+
+        Ok(Box::new(reports))
     }
 }
 
@@ -36,7 +52,8 @@ impl ToPrefix for FileTypeMobileRewardShare {
 #[async_trait::async_trait]
 impl DbTable for FileTypeMobileRewardShare {
     async fn create_table(&self, db: &sqlx::Pool<sqlx::Postgres>) -> anyhow::Result<()> {
-        sqlx::query(r#"
+        sqlx::query(
+            r#"
             DO $$ BEGIN
                 CREATE TYPE boosted_hex AS (
                     location bigint,
@@ -45,11 +62,13 @@ impl DbTable for FileTypeMobileRewardShare {
             EXCEPTION
                 WHEN duplicate_object THEN null;
             END $$;
-            "#)
+            "#,
+        )
         .execute(db)
         .await?;
 
-        sqlx::query(r#"
+        sqlx::query(
+            r#"
                 CREATE TABLE IF NOT EXISTS mobile_radio_rewards (
                 	hotspot_key text NOT NULL,
                 	cbsd_id text NULL,
@@ -59,43 +78,50 @@ impl DbTable for FileTypeMobileRewardShare {
                 	transfer_amount int8 NULL,
                 	boosted_hexes boosted_hex[] NOT NULL
                 )
-            "#)
+            "#,
+        )
         .execute(db)
         .await?;
 
-        sqlx::query(r#"
+        sqlx::query(
+            r#"
                 CREATE TABLE IF NOT EXISTS mobile_gateway_rewards (
                 	hotspot_key text NOT NULL,
                 	amount int8 NOT NULL,
                 	start_period timestamptz NOT NULL,
                 	end_period timestamptz NOT NULL
                 )
-            "#)
+            "#,
+        )
         .execute(db)
         .await?;
 
-        sqlx::query(r#"
+        sqlx::query(
+            r#"
                 CREATE TABLE IF NOT EXISTS mobile_service_provider_rewards (
                     service_provider text not null,
                     amount bigint not null,
                     start_period timestamptz not null,
                     end_period timestamptz not null
                 )
-            "#)
+            "#,
+        )
         .execute(db)
         .await?;
 
-        sqlx::query(r#"
+        sqlx::query(
+            r#"
                 CREATE TABLE IF NOT EXISTS mobile_unallocated_rewards (
                     reward_type text not null,
                     amount bigint not null,
                     start_period timestamptz not null,
                     end_period timestamptz not null
                 )
-        "#)
+        "#,
+        )
         .execute(db)
         .await?;
-        
+
         sqlx::query(
             r#"
                 CREATE TABLE IF NOT EXISTS mobile_subscriber_rewards (
@@ -114,17 +140,18 @@ impl DbTable for FileTypeMobileRewardShare {
 }
 
 #[async_trait::async_trait]
-impl Persist for MobileRewardShare {
+impl Insertable for Vec<MobileRewardShare> {
     #[allow(deprecated)]
-    async fn save(self: Box<Self>, pool: &Pool<Postgres>) -> anyhow::Result<()> {
-        match self.reward {
+    async fn insert(&self, pool: &Pool<Postgres>) -> anyhow::Result<()> {
+        for share in self {
+            match share.reward.clone() {
             Some(mobile_reward_share::Reward::RadioReward(radio)) => {
                 let boosted_hexes: Vec<BoostedHex> = radio.boosted_hexes.into_iter()
                     .map(|h| BoostedHex {
                         location: h.location as i64,
                         multiplier: h.multiplier as i32,
                     }).collect();
-                
+
                 sqlx::query(
                     r#"
                         INSERT INTO mobile_radio_rewards(hotspot_key, cbsd_id, amount, start_period, end_period, transfer_amount, boosted_hexes)
@@ -134,8 +161,8 @@ impl Persist for MobileRewardShare {
                 .bind(PublicKey::try_from(radio.hotspot_key)?.to_string())
                 .bind(radio.cbsd_id)
                 .bind(radio.poc_reward as i64)
-                .bind(to_datetime(self.start_period))
-                .bind(to_datetime(self.end_period))
+                .bind(to_datetime(share.start_period))
+                .bind(to_datetime(share.end_period))
                 .bind(radio.dc_transfer_reward as i64)
                 .bind(boosted_hexes)
                 .execute(pool)
@@ -150,8 +177,8 @@ impl Persist for MobileRewardShare {
                 )
                 .bind(PublicKey::try_from(gateway.hotspot_key)?.to_string())
                 .bind(gateway.dc_transfer_reward as i64)
-                .bind(to_datetime(self.start_period))
-                .bind(to_datetime(self.end_period))
+                .bind(to_datetime(share.start_period))
+                .bind(to_datetime(share.end_period))
                 .execute(pool)
                 .await
                 .map(|_| ())?,
@@ -163,8 +190,8 @@ impl Persist for MobileRewardShare {
                 )
                 .bind(sub.subscriber_id)
                 .bind(sub.discovery_location_amount as i64)
-                .bind(to_datetime(self.start_period))
-                .bind(to_datetime(self.end_period))
+                .bind(to_datetime(share.start_period))
+                .bind(to_datetime(share.end_period))
                 .execute(pool)
                 .await
                 .map(|_| ())?,
@@ -175,8 +202,8 @@ impl Persist for MobileRewardShare {
                 )
                 .bind(service.service_provider_id().as_str_name())
                 .bind(service.amount as i64)
-                .bind(to_datetime(self.start_period))
-                .bind(to_datetime(self.end_period))
+                .bind(to_datetime(share.start_period))
+                .bind(to_datetime(share.end_period))
                 .execute(pool)
                 .await
                 .map(|_| ())?,
@@ -187,13 +214,14 @@ impl Persist for MobileRewardShare {
                 )
                 .bind(unallocated.reward_type().as_str_name())
                 .bind(unallocated.amount as i64)
-                .bind(to_datetime(self.start_period))
-                .bind(to_datetime(self.end_period))
+                .bind(to_datetime(share.start_period))
+                .bind(to_datetime(share.end_period))
                 .execute(pool)
                 .await
                 .map(|_| ())?,
             _ => (),
         };
+        }
         Ok(())
     }
 }

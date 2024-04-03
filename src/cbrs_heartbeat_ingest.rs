@@ -1,17 +1,26 @@
-use std::str::FromStr;
+use file_store::{
+    heartbeat::CbrsHeartbeatIngestReport, traits::MsgDecode, BytesMutStream, FileType,
+};
+use futures::TryStreamExt;
+use sqlx::{Pool, Postgres, QueryBuilder};
 
-use file_store::{heartbeat::CbrsHeartbeatIngestReport, traits::MsgDecode, FileType};
-use helium_crypto::PublicKeyBinary;
-use sqlx::{Pool, Postgres};
-
-use crate::{DbTable, Decode, Persist, ToPrefix};
+use crate::{DbTable, Decode, Insertable, ToPrefix};
 
 #[derive(Clone, Debug)]
 pub struct FileTypeCbrsHeartbeatIngestReport {}
 
+#[async_trait::async_trait]
 impl Decode for FileTypeCbrsHeartbeatIngestReport {
-    fn decode(&self, buf: bytes::BytesMut) -> anyhow::Result<Box<dyn Persist>> {
-        Ok(Box::new(CbrsHeartbeatIngestReport::decode(buf)?))
+    async fn decode(&self, stream: BytesMutStream) -> anyhow::Result<Box<dyn Insertable>> {
+        let reports = stream
+            .map_err(anyhow::Error::from)
+            .and_then(|buf| async move {
+                CbrsHeartbeatIngestReport::decode(buf).map_err(anyhow::Error::from)
+            })
+            .try_collect::<Vec<_>>()
+            .await?;
+
+        Ok(Box::new(reports))
     }
 }
 
@@ -49,28 +58,34 @@ impl DbTable for FileTypeCbrsHeartbeatIngestReport {
 }
 
 #[async_trait::async_trait]
-impl Persist for CbrsHeartbeatIngestReport {
-    async fn save(self: Box<Self>, pool: &Pool<Postgres>) -> anyhow::Result<()> {
-        sqlx::query(
-                    r#"
-                        INSERT INTO mobile_cbrs_ingest_reports(hotspot_key, hotspot_type, cell_id, received_timestamp, timestamp, lat, lon, operation_mode, cbsd_category, cbsd_id, coverage_object)
-                        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-                    "#,
-                )
-                .bind(self.report.pubkey.to_string())
-                .bind(self.report.hotspot_type)
-                .bind(self.report.cell_id as i32)
-                .bind(self.received_timestamp)
-                .bind(self.report.timestamp)
-                .bind(self.report.lat)
-                .bind(self.report.lon)
-                .bind(self.report.operation_mode)
-                .bind(self.report.cbsd_category)
-                .bind(self.report.cbsd_id)
-                .bind(self.report.coverage_object)
-                .execute(pool)
-                .await
-                .map(|_| ())
-                .map_err(anyhow::Error::from)
+impl Insertable for Vec<CbrsHeartbeatIngestReport> {
+    async fn insert(&self, db: &Pool<Postgres>) -> anyhow::Result<()> {
+        const NUM_IN_BATCH: usize = (u16::MAX / 11) as usize;
+
+        for chunk in self.chunks(NUM_IN_BATCH) {
+            let mut qb = QueryBuilder::new(
+                r#"
+                INSERT INTO mobile_cbrs_ingest_reports(hotspot_key, hotspot_type, cell_id, received_timestamp, timestamp, lat, lon, operation_mode, cbsd_category, cbsd_id, coverage_object)
+                "#,
+            );
+
+            qb.push_values(chunk, |mut b, hb| {
+                b.push_bind(hb.report.pubkey.to_string())
+                    .push_bind(&hb.report.hotspot_type)
+                    .push_bind(hb.report.cell_id as i32)
+                    .push_bind(hb.received_timestamp)
+                    .push_bind(hb.report.timestamp)
+                    .push_bind(hb.report.lat)
+                    .push_bind(hb.report.lon)
+                    .push_bind(hb.report.operation_mode)
+                    .push_bind(&hb.report.cbsd_category)
+                    .push_bind(&hb.report.cbsd_id)
+                    .push_bind(&hb.report.coverage_object);
+            })
+            .build()
+            .execute(db)
+            .await?;
+        }
+        Ok(())
     }
 }

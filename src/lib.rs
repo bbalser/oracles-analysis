@@ -1,10 +1,10 @@
 use boosted_hex_update::FileTypeBoostedHexUpdate;
-use bytes::BytesMut;
 use cbrs_heartbeat_ingest::FileTypeCbrsHeartbeatIngestReport;
 use cell_speedtest_ingest::FileTypeCellSpeedtestIngestReport;
 use chrono::{DateTime, TimeZone, Utc};
 use clap::ValueEnum;
 use coverage_object::FileTypeCoverageObject;
+use file_store::BytesMutStream;
 use iot_reward_share::FileTypeIotRewardShare;
 use mobile_reward_share::FileTypeMobileRewardShare;
 use oracle_boosting::FileTypeOracleBoostingReport;
@@ -18,7 +18,6 @@ mod cbrs_heartbeat_ingest;
 mod cell_speedtest_ingest;
 pub mod commands;
 mod coverage_object;
-mod files_processed;
 mod iot_reward_share;
 mod mobile_reward_share;
 mod oracle_boosting;
@@ -73,8 +72,8 @@ impl SupportedFileTypes {
         self.inner().to_prefix()
     }
 
-    pub fn decode(&self, buf: BytesMut) -> anyhow::Result<Box<dyn Persist>> {
-        self.inner().decode(buf)
+    pub async fn decode(&self, buf: BytesMutStream) -> anyhow::Result<Box<dyn Insertable>> {
+        self.inner().decode(buf).await
     }
 
     pub async fn create_table(&self, db: &Pool<Postgres>) -> anyhow::Result<()> {
@@ -83,12 +82,13 @@ impl SupportedFileTypes {
 }
 
 #[async_trait::async_trait]
-pub trait Persist {
-    async fn save(self: Box<Self>, pool: &Pool<Postgres>) -> anyhow::Result<()>;
+pub trait Decode {
+    async fn decode(&self, stream: BytesMutStream) -> anyhow::Result<Box<dyn Insertable>>;
 }
 
-pub trait Decode {
-    fn decode(&self, buf: BytesMut) -> anyhow::Result<Box<dyn Persist>>;
+#[async_trait::async_trait]
+pub trait Insertable {
+    async fn insert(&self, db: &Pool<Postgres>) -> anyhow::Result<()>;
 }
 
 pub trait ToPrefix {

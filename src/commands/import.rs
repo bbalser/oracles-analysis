@@ -1,5 +1,3 @@
-use futures::TryStreamExt;
-
 use crate::SupportedFileTypes;
 
 use super::{DbArgs, S3Args, TimeArgs};
@@ -33,17 +31,13 @@ impl Import {
 
         for file_info in file_infos {
             println!("processing file: {}", file_info);
-            store
-                .stream_file(file_info)
+
+            let bytes_stream = store.stream_file(file_info).await?;
+
+            self.file_type
+                .decode(bytes_stream)
                 .await?
-                .map_err(anyhow::Error::from)
-                .try_fold((&db, &self.file_type), |(db, file_type), buf| async move {
-                    file_type
-                        .decode(buf)?
-                        .save(db)
-                        .await
-                        .map(|_| (db, file_type))
-                })
+                .insert(&db)
                 .await?;
         }
 

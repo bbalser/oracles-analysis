@@ -1,4 +1,5 @@
-use file_store::FileType;
+use file_store::{BytesMutStream, FileType};
+use futures::TryStreamExt;
 use helium_crypto::PublicKey;
 use helium_proto::{
     services::poc_lora::{iot_reward_share, IotRewardShare},
@@ -6,14 +7,21 @@ use helium_proto::{
 };
 use sqlx::{Pool, Postgres};
 
-use crate::{to_datetime, DbTable, Decode, Persist, ToPrefix};
+use crate::{to_datetime, DbTable, Decode, Insertable, ToPrefix};
 
 #[derive(Debug, Clone)]
 pub struct FileTypeIotRewardShare {}
 
+#[async_trait::async_trait]
 impl Decode for FileTypeIotRewardShare {
-    fn decode(&self, buf: bytes::BytesMut) -> anyhow::Result<Box<dyn Persist>> {
-        Ok(Box::new(IotRewardShare::decode(buf)?))
+    async fn decode(&self, stream: BytesMutStream) -> anyhow::Result<Box<dyn Insertable>> {
+        let reports = stream
+            .map_err(anyhow::Error::from)
+            .and_then(|buf| async move { IotRewardShare::decode(buf).map_err(anyhow::Error::from) })
+            .try_collect::<Vec<_>>()
+            .await?;
+
+        Ok(Box::new(reports))
     }
 }
 
@@ -59,22 +67,23 @@ impl DbTable for FileTypeIotRewardShare {
 }
 
 #[async_trait::async_trait]
-impl Persist for IotRewardShare {
+impl Insertable for Vec<IotRewardShare> {
     #[allow(deprecated)]
-    async fn save(self: Box<Self>, pool: &Pool<Postgres>) -> anyhow::Result<()> {
-        match self.reward {
+    async fn insert(&self, pool: &Pool<Postgres>) -> anyhow::Result<()> {
+        for share in self {
+            match &share.reward {
             Some(iot_reward_share::Reward::GatewayReward(gateway)) => sqlx::query(
                 r#"
                     INSERT INTO iot_gateway_rewards(hotspot_key, beacon_amount, witness_amount, dc_transfer_amount, start_period, end_period)
                     VALUES($1,$2,$3,$4,$5,$6)
                 "#
                 )
-                .bind(PublicKey::try_from(gateway.hotspot_key)?.to_string())
+                .bind(PublicKey::try_from(gateway.hotspot_key.clone())?.to_string())
                 .bind(gateway.beacon_amount as i64)
                 .bind(gateway.witness_amount as i64)
                 .bind(gateway.dc_transfer_amount as i64)
-                .bind(to_datetime(self.start_period))
-                .bind(to_datetime(self.end_period))
+                .bind(to_datetime(share.start_period))
+                .bind(to_datetime(share.end_period))
                 .execute(pool)
                 .await
                 .map(|_| ())?,
@@ -86,8 +95,8 @@ impl Persist for IotRewardShare {
                 )
                 .bind("operational")
                 .bind(operational.amount as i64)
-                .bind(to_datetime(self.start_period))
-                .bind(to_datetime(self.end_period))
+                .bind(to_datetime(share.start_period))
+                .bind(to_datetime(share.end_period))
                 .execute(pool)
                 .await
                 .map(|_| ())?,
@@ -99,13 +108,14 @@ impl Persist for IotRewardShare {
                 )
                 .bind(unallocated.reward_type().as_str_name())
                 .bind(unallocated.amount as i64)
-                .bind(to_datetime(self.start_period))
-                .bind(to_datetime(self.end_period))
+                .bind(to_datetime(share.start_period))
+                .bind(to_datetime(share.end_period))
                 .execute(pool)
                 .await
                 .map(|_| ())?,
             _ => (),
         };
+        }
         Ok(())
     }
 }

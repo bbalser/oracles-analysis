@@ -1,15 +1,25 @@
-use file_store::{heartbeat::cli::ValidatedHeartbeat, traits::MsgDecode, FileType};
+use file_store::{heartbeat::cli::ValidatedHeartbeat, traits::MsgDecode, BytesMutStream, FileType};
+use futures::TryStreamExt;
 use helium_crypto::PublicKey;
-use sqlx::{Pool, Postgres};
+use sqlx::{Pool, Postgres, QueryBuilder};
 
-use crate::{DbTable, Decode, Persist, ToPrefix};
+use crate::{DbTable, Decode, Insertable, ToPrefix};
 
 #[derive(Debug, Clone)]
 pub struct FileTypeValidatedHeartbeat {}
 
+#[async_trait::async_trait]
 impl Decode for FileTypeValidatedHeartbeat {
-    fn decode(&self, buf: bytes::BytesMut) -> anyhow::Result<Box<dyn Persist>> {
-        Ok(Box::new(ValidatedHeartbeat::decode(buf)?))
+    async fn decode(&self, stream: BytesMutStream) -> anyhow::Result<Box<dyn Insertable>> {
+        let reports = stream
+            .map_err(anyhow::Error::from)
+            .and_then(
+                |buf| async move { ValidatedHeartbeat::decode(buf).map_err(anyhow::Error::from) },
+            )
+            .try_collect::<Vec<_>>()
+            .await?;
+
+        Ok(Box::new(reports))
     }
 }
 
@@ -47,31 +57,32 @@ impl DbTable for FileTypeValidatedHeartbeat {
 }
 
 #[async_trait::async_trait]
-impl Persist for ValidatedHeartbeat {
-    async fn save(self: Box<Self>, pool: &Pool<Postgres>) -> anyhow::Result<()> {
-        if self.cbsd_id.len() == 0 {
-            sqlx::query(r#"
-                INSERT INTO mobile_validated_heartbeats(hotspot_key, cbsd_id, reward_multiplier, cell_type, validity, location_validation_timestamp, distance_to_asserted, timestamp, location_trust_score_multiplier, lat, lon)
-                VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-            "#)
-            .bind(PublicKey::try_from(self.pub_key)?.to_string())
-            .bind(self.cbsd_id)
-            .bind(0)
-            .bind(self.cell_type.as_str_name())
-            .bind(self.validity.as_str_name())
-            .bind(self.location_validation_timestamp)
-            .bind(self.distance_to_asserted as i64)
-            .bind(self.timestamp)
-            .bind(self.location_trust_score_multiplier as i64)
-            .bind(self.lat)
-            .bind(self.lon)
+impl Insertable for Vec<ValidatedHeartbeat> {
+    async fn insert(&self, pool: &Pool<Postgres>) -> anyhow::Result<()> {
+        const NUM_IN_BATCH: usize = (u16::MAX / 11) as usize;
+
+        for chunk in self.chunks(NUM_IN_BATCH) {
+            let mut qb = QueryBuilder::new("INSERT INTO mobile_validated_heartbeats(hotspot_key, cbsd_id, reward_multiplier, cell_type, validity, location_validation_timestamp, distance_to_asserted, timestamp, location_trust_score_multiplier, lat, lon)");
+
+            qb.push_values(chunk, |mut b, hb| {
+                b.push_bind(PublicKey::try_from(hb.pub_key.clone()).unwrap().to_string())
+                    .push_bind(&hb.cbsd_id)
+                    .push_bind(0)
+                    .push_bind(hb.cell_type.as_str_name())
+                    .push_bind(hb.validity.as_str_name())
+                    .push_bind(hb.location_validation_timestamp)
+                    .push_bind(hb.distance_to_asserted as i64)
+                    .push_bind(hb.timestamp)
+                    .push_bind(hb.location_trust_score_multiplier as i64)
+                    .push_bind(hb.lat)
+                    .push_bind(hb.lon);
+            })
+            .build()
             .execute(pool)
-            .await
-            .map(|_| ())
-            .map_err(anyhow::Error::from)
-        } else {
-            Ok(())
+            .await?;
         }
+
+        Ok(())
     }
 }
 
@@ -81,15 +92,12 @@ mod tests {
 
     #[test]
     fn brian() -> anyhow::Result<()> {
-        let assert_location: LatLng = CellIndex::try_from(631711284849186303)?.into();
+        let hb_location: LatLng = LatLng::new(17.065196667, -96.726701667)?;
+        let hb_cell: LatLng = hb_location.to_cell(Resolution::Twelve).into();
 
-        let location: LatLng = LatLng::new(25.791909, -80.149107)?;
+        let cell: LatLng = CellIndex::try_from(632424975550531071)?.into();
 
-        dbg!(assert_location.distance_m(location).round());
-
-        let snapped_location: LatLng = location.to_cell(Resolution::Twelve).into();
-
-        dbg!(assert_location.distance_m(snapped_location).round());
+        dbg!(cell.distance_m(hb_cell).round());
 
         Ok(())
     }

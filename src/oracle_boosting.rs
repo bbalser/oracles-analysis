@@ -1,15 +1,25 @@
-use file_store::FileType;
+use file_store::{BytesMutStream, FileType};
+use futures::TryStreamExt;
 use helium_proto::{services::poc_mobile::OracleBoostingReportV1, Message};
-use sqlx::{Pool, Postgres};
+use sqlx::{Pool, Postgres, QueryBuilder};
 
-use crate::{to_datetime, DbTable, Decode, Persist, ToPrefix};
+use crate::{to_datetime, DbTable, Decode, Insertable, ToPrefix};
 
 #[derive(Clone, Debug)]
 pub struct FileTypeOracleBoostingReport {}
 
+#[async_trait::async_trait]
 impl Decode for FileTypeOracleBoostingReport {
-    fn decode(&self, buf: bytes::BytesMut) -> anyhow::Result<Box<dyn Persist>> {
-        Ok(Box::new(OracleBoostingReportV1::decode(buf)?))
+    async fn decode(&self, stream: BytesMutStream) -> anyhow::Result<Box<dyn Insertable>> {
+        let reports = stream
+            .map_err(anyhow::Error::from)
+            .and_then(|buf| async move {
+                OracleBoostingReportV1::decode(buf).map_err(anyhow::Error::from)
+            })
+            .try_collect::<Vec<_>>()
+            .await?;
+
+        Ok(Box::new(reports))
     }
 }
 
@@ -41,25 +51,36 @@ impl DbTable for FileTypeOracleBoostingReport {
 }
 
 #[async_trait::async_trait]
-impl Persist for OracleBoostingReportV1 {
-    async fn save(self: Box<Self>, pool: &Pool<Postgres>) -> anyhow::Result<()> {
-        let uuid = uuid::Uuid::from_slice(&self.coverage_object)?;
-        let timestamp = to_datetime(self.timestamp);
+impl Insertable for Vec<OracleBoostingReportV1> {
+    async fn insert(&self, db: &Pool<Postgres>) -> anyhow::Result<()> {
+        const NUM_IN_BATCH: usize = (u16::MAX / 5) as usize;
 
-        for hex in self.assignments {
-            sqlx::query(r#"
-                INSERT INTO oracle_boosting(coverage_object, timestamp, location, urbanized, multiplier)
-                VALUES($1,$2,$3,$4,$5)
-            "#,
-            )
-            .bind(uuid)
-            .bind(timestamp)
-            .bind(i64::from_str_radix(&hex.location, 16)?)
-            .bind(hex.urbanized().as_str_name())
-            .bind(hex.assignment_multiplier as i32)
-            .execute(pool)
-            .await
-            .map_err(anyhow::Error::from)?;
+        let rows: Vec<_> = self
+            .iter()
+            .flat_map(|report| {
+                let uuid = uuid::Uuid::from_slice(&report.coverage_object).unwrap();
+                let timestamp = to_datetime(report.timestamp);
+
+                report
+                    .assignments
+                    .iter()
+                    .map(move |assignment| (uuid.clone(), timestamp.clone(), assignment))
+            })
+            .collect();
+
+        for chunk in rows.chunks(NUM_IN_BATCH) {
+            let mut qb = QueryBuilder::new("INSERT INTO oracle_boosting(coverage_object, timestamp, location, urbanized, multiplier)");
+
+            qb.push_values(chunk, |mut b, (uuid, timestamp, hex)| {
+                b.push_bind(uuid)
+                    .push_bind(timestamp)
+                    .push_bind(i64::from_str_radix(&hex.location, 16).unwrap())
+                    .push_bind(hex.urbanized().as_str_name())
+                    .push_bind(hex.assignment_multiplier as i32);
+            })
+            .build()
+            .execute(db)
+            .await?;
         }
 
         Ok(())
