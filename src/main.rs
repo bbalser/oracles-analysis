@@ -1,10 +1,7 @@
-use std::str::FromStr;
-
 use chrono::{DateTime, Utc};
 use clap::Parser;
 
 use h3o::{CellIndex, LatLng};
-use helium_crypto::PublicKeyBinary;
 use oracle_persist::commands::{clean::Clean, import::Import};
 use rust_decimal::{prelude::ToPrimitive, Decimal};
 use sqlx::Row;
@@ -45,39 +42,29 @@ struct AssertedDistance {
     db: oracle_persist::commands::DbArgs,
     #[arg(long)]
     pubkey: String,
+    #[arg(long)]
+    asserted_location: u64,
 }
 
 impl AssertedDistance {
     async fn run(self) -> anyhow::Result<()> {
         let db = self.db.connect().await?;
-        let pubkey = PublicKeyBinary::from_str(&self.pubkey)?;
-        let entity_key = bs58::decode(pubkey.to_string()).into_vec()?;
-        let hex = hex::encode(&entity_key);
-        println!("entity_key = {:?}", hex);
 
-        let location: Option<i64> = sqlx::query_scalar(
-            r#"
-            SELECT m.location::bigint
-            FROM key_to_assets k 
-                INNER JOIN mobile_hotspot_infos m on k.asset = m.asset
-            WHERE k.entity_key = $1
-            "#,
-        )
-        .bind(entity_key)
-        .fetch_optional(&db)
-        .await?;
+        println!("asserted location: {:?}", self.asserted_location);
 
-        println!("asserted location: {:?}", location);
-
-        let asserted_latlng: LatLng = CellIndex::try_from(location.unwrap() as u64)?.into();
+        let asserted_latlng: LatLng = CellIndex::try_from(self.asserted_location)?.into();
         dbg!(asserted_latlng);
 
         let results = sqlx::query(
-            r#"
-            SELECT timestamp, lat, lon
-            FROM mobile_wifi_ingest_reports
-            WHERE hotspot_key = $1
-            ORDER BY timestamp asc
+        r#"
+            WITH t1 AS (
+            	SELECT *, lag(distance_to_asserted) OVER (PARTITION BY hotspot_key ORDER BY timestamp) AS prev_distance_to_asserted
+            	FROM mobile_validated_heartbeats mvh 
+            	WHERE mvh.hotspot_key = $1
+            )
+            SELECT timestamp, distance_to_asserted, location_validation_timestamp, lat, lon
+            FROM t1
+            WHERE distance_to_asserted IS DISTINCT FROM prev_distance_to_asserted
         "#,
         )
         .bind(self.pubkey)
@@ -88,18 +75,17 @@ impl AssertedDistance {
             let ts = row.get::<DateTime<Utc>, &str>("timestamp");
             let lat = row.get::<Decimal, &str>("lat").to_f64().unwrap();
             let lon = row.get::<Decimal, &str>("lon").to_f64().unwrap();
+            let original_distance_to_asserted = row.get::<i64, &str>("distance_to_asserted");
 
             let ll: LatLng = LatLng::new(lat, lon)?
                 .to_cell(h3o::Resolution::Twelve)
                 .into();
 
             let distance = asserted_latlng.distance_m(ll).round();
-            if distance > 30.0 {
-                println!(
-                    "timestamp = {}, lat = {}, lng = {}, distance = {}",
-                    ts, lat, lon, distance
-                );
-            }
+            println!(
+                "timestamp = {}, lat = {}, lng = {}, original = {}, distance = {}",
+                ts, lat, lon, original_distance_to_asserted, distance
+            );
         }
 
         Ok(())

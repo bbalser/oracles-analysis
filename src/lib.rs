@@ -116,3 +116,53 @@ pub fn to_optional_datetime(timestamp: u64) -> Option<DateTime<Utc>> {
         Some(to_datetime(timestamp))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::fs::File;
+
+    use apache_avro::{from_value, Reader};
+    use chrono::NaiveDateTime;
+    use serde::Deserialize;
+    use uuid::Uuid;
+
+    #[derive(Clone, Debug, Deserialize)]
+    pub struct CdrRaw {
+        pub id: String,
+        pub cdr_type: String,
+        pub record_type: i16,
+        // The time the record was written by T-Mobile
+        pub creation_time: String,
+        // The time the record was harvested from the FTP
+        pub created_at: String,
+        pub imsi: String,
+        pub msisdn: String,
+        pub imei: String,
+        pub total_volume: Option<f64>,
+        pub uplink_volume: Option<f64>,
+        pub downlink_volume: Option<f64>,
+        pub call_time_min: Option<i64>,
+        pub agw_sn: Option<String>,
+        pub subscriber_id: Option<Uuid>,
+        pub cbsd_id: Option<String>,
+    }
+
+    #[tokio::test]
+    async fn brian() -> anyhow::Result<()> {
+        let f = File::open("hm-wifirecords-20240424161927.dat")?;
+        let reader = Reader::new(f)?;
+
+        let value = reader.into_iter().next().unwrap()?;
+        dbg!(&value);
+        let cdr = from_value::<CdrRaw>(&value)?;
+        dbg!(cdr);
+
+        // for value in reader {
+        //     dbg!(&value);
+        //     let cdr = from_value::<Cdr>(&value.unwrap())?;
+        //     dbg!(cdr);
+        // }
+
+        Ok(())
+    }
+}

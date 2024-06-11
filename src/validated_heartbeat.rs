@@ -61,7 +61,10 @@ impl Insertable for Vec<ValidatedHeartbeat> {
     async fn insert(&self, pool: &Pool<Postgres>) -> anyhow::Result<()> {
         const NUM_IN_BATCH: usize = (u16::MAX / 11) as usize;
 
-        for chunk in self.chunks(NUM_IN_BATCH) {
+        let hbs: Vec<&ValidatedHeartbeat> =
+            self.iter().filter(|hb| hb.cbsd_id.len() == 0).collect();
+
+        for chunk in hbs.chunks(NUM_IN_BATCH) {
             let mut qb = QueryBuilder::new("INSERT INTO mobile_validated_heartbeats(hotspot_key, cbsd_id, reward_multiplier, cell_type, validity, location_validation_timestamp, distance_to_asserted, timestamp, location_trust_score_multiplier, lat, lon)");
 
             qb.push_values(chunk, |mut b, hb| {
@@ -81,23 +84,6 @@ impl Insertable for Vec<ValidatedHeartbeat> {
             .execute(pool)
             .await?;
         }
-
-        Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use h3o::{CellIndex, LatLng, Resolution};
-
-    #[test]
-    fn brian() -> anyhow::Result<()> {
-        let hb_location: LatLng = LatLng::new(17.065196667, -96.726701667)?;
-        let hb_cell: LatLng = hb_location.to_cell(Resolution::Twelve).into();
-
-        let cell: LatLng = CellIndex::try_from(632424975550531071)?.into();
-
-        dbg!(cell.distance_m(hb_cell).round());
 
         Ok(())
     }

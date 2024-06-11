@@ -72,9 +72,12 @@ impl DbTable for FileTypeMobileRewardShare {
                 CREATE TABLE IF NOT EXISTS mobile_radio_rewards (
                 	hotspot_key text NOT NULL,
                 	cbsd_id text NULL,
+                	coverage_points int8 NOT NULL,
                 	amount int8 NOT NULL,
                 	start_period timestamptz NOT NULL,
                 	end_period timestamptz NULL,
+                	location_trust_score_multiplier int4 NOT NULL,
+                	speedtest_multiplier int4 NOT NULL,
                 	transfer_amount int8 NULL,
                 	boosted_hexes boosted_hex[] NOT NULL
                 )
@@ -154,17 +157,20 @@ impl Insertable for Vec<MobileRewardShare> {
 
                 sqlx::query(
                     r#"
-                        INSERT INTO mobile_radio_rewards(hotspot_key, cbsd_id, amount, start_period, end_period, transfer_amount, boosted_hexes)
-                        VALUES($1,$2,$3,$4,$5,$6,$7)
+                        INSERT INTO mobile_radio_rewards(hotspot_key, cbsd_id, coverage_points, amount, start_period, end_period, transfer_amount, boosted_hexes, location_trust_score_multiplier, speedtest_multiplier)
+                        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
                     "#,
                 )
                 .bind(PublicKey::try_from(radio.hotspot_key)?.to_string())
                 .bind(radio.cbsd_id)
+                .bind(radio.coverage_points as i64)
                 .bind(radio.poc_reward as i64)
                 .bind(to_datetime(share.start_period))
                 .bind(to_datetime(share.end_period))
                 .bind(radio.dc_transfer_reward as i64)
                 .bind(boosted_hexes)
+                .bind(radio.location_trust_score_multiplier as i32)
+                .bind(radio.speedtest_multiplier as i32)
                 .execute(pool)
                 .await
                 .map(|_| ())?
