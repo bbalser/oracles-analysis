@@ -10,6 +10,7 @@ use mobile_reward_share::FileTypeMobileRewardShare;
 use oracle_boosting::FileTypeOracleBoostingReport;
 use radio_thresholds::{FileTypeInvalidatedRadioThreshold, FileTypeRadioThreshold};
 use sqlx::{Pool, Postgres};
+use valid_data_transfer_session::FileTypeValidDataTransferSession;
 use validated_heartbeat::FileTypeValidatedHeartbeat;
 use wifi_heartbeat_ingest_report::FileTypeWifiHeartbeatIngestReport;
 
@@ -22,6 +23,7 @@ mod iot_reward_share;
 mod mobile_reward_share;
 mod oracle_boosting;
 mod radio_thresholds;
+mod valid_data_transfer_session;
 mod validated_heartbeat;
 mod wifi_heartbeat_ingest_report;
 
@@ -37,6 +39,7 @@ pub enum SupportedFileTypes {
     RadioThreshold,
     InvalidatedRadioThreshold,
     ValidatedHeartbeat,
+    ValidDataTransferSession,
     WifiHeartbeatIngestReport,
 }
 
@@ -61,6 +64,9 @@ impl SupportedFileTypes {
             SupportedFileTypes::MobileRewardShare => Box::new(FileTypeMobileRewardShare {}),
             SupportedFileTypes::OracleBoostingReport => Box::new(FileTypeOracleBoostingReport {}),
             SupportedFileTypes::RadioThreshold => Box::new(FileTypeRadioThreshold {}),
+            SupportedFileTypes::ValidDataTransferSession => {
+                Box::new(FileTypeValidDataTransferSession)
+            }
             SupportedFileTypes::ValidatedHeartbeat => Box::new(FileTypeValidatedHeartbeat {}),
             SupportedFileTypes::WifiHeartbeatIngestReport => {
                 Box::new(FileTypeWifiHeartbeatIngestReport {})
@@ -122,7 +128,6 @@ mod tests {
     use std::fs::File;
 
     use apache_avro::{from_value, Reader};
-    use chrono::NaiveDateTime;
     use serde::Deserialize;
     use uuid::Uuid;
 

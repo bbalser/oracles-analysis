@@ -688,7 +688,7 @@ source = "git+https://github.com/helium/proto?branch=master#7011d31e39af8d548466
 dependencies = [
  "base64 0.21.5",
  "byteorder",
- "helium-proto",
+ "helium-proto 0.1.0 (git+https://github.com/helium/proto?branch=master)",
  "prost",
  "rand",
  "rand_chacha",
@@ -1439,7 +1439,7 @@ dependencies = [
  "futures-util",
  "h3o",
  "helium-crypto",
- "helium-proto",
+ "helium-proto 0.1.0 (git+https://github.com/helium/proto?branch=master)",
  "http",
  "lazy_static",
  "metrics",
@@ -1764,6 +1764,20 @@ dependencies = [
  "signature",
  "sqlx 0.7.3",
  "thiserror",
+]
+
+[[package]]
+name = "helium-proto"
+version = "0.1.0"
+source = "git+https://github.com/helium/proto?branch=bbalser/radio-reward-v2#c2541ce556d0c53a7d2e0b209fad571499ea5d55"
+dependencies = [
+ "bytes",
+ "prost",
+ "prost-build",
+ "serde",
+ "serde_json",
+ "tonic",
+ "tonic-build",
 ]
 
 [[package]]
@@ -2437,7 +2451,7 @@ dependencies = [
  "futures",
  "h3o",
  "helium-crypto",
- "helium-proto",
+ "helium-proto 0.1.0 (git+https://github.com/helium/proto?branch=bbalser/radio-reward-v2)",
  "hex",
  "rust_decimal",
  "serde",

@@ -111,3 +111,21 @@ async fn main() -> anyhow::Result<()> {
 
     args.command.run().await
 }
+
+#[cfg(test)]
+mod tests {
+    use h3o::LatLng;
+
+    #[test]
+    fn brian() -> anyhow::Result<()> {
+        let co_ll: LatLng = h3o::CellIndex::try_from(631781452644486655)?.into();
+        let hb_ll: LatLng = LatLng::new(33.1158099001481, -96.8272952806648)?
+            .to_cell(h3o::Resolution::Twelve)
+            .into();
+
+        let d = co_ll.distance_m(hb_ll);
+        dbg!(d);
+
+        Ok(())
+    }
+}
