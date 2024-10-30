@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use chrono::{DateTime, Utc};
 use file_store::{BytesMutStream, FileType};
 use futures::TryStreamExt;
@@ -6,8 +8,10 @@ use helium_proto::{
     services::poc_mobile::{self as proto, mobile_reward_share, MobileRewardShare},
     Message,
 };
+use rust_decimal::Decimal;
 use sqlx::{
-    postgres::{PgHasArrayType, PgTypeInfo}, Pool, Postgres, QueryBuilder, Row
+    postgres::{PgHasArrayType, PgTypeInfo},
+    Pool, Postgres, QueryBuilder, Row,
 };
 use uuid::Uuid;
 
@@ -34,9 +38,14 @@ impl Decode for FileTypeMobileRewardShare {
     async fn decode(&self, stream: BytesMutStream) -> anyhow::Result<Box<dyn Insertable>> {
         let reports = stream
             .map_err(anyhow::Error::from)
-            .and_then(
-                |buf| async move { MobileRewardShare::decode(buf).map_err(anyhow::Error::from) },
-            )
+            .and_then(|buf| async move {
+                // let length = buf.len();
+                MobileRewardShare::decode(buf).map_err(anyhow::Error::from)
+                // let proto = share.unwrap();
+                // if let Some(mobile_reward_share::Reward::RadioRewardV2(reward)) = proto.clone().reward {
+                //     println!("buf len: {}, covered_hexes: {}", length, reward.covered_hexes.len());
+                // }
+            })
             .try_collect::<Vec<_>>()
             .await?;
 
@@ -95,16 +104,16 @@ impl DbTable for FileTypeMobileRewardShare {
                 	end_period timestamptz NULL,
                 	hotspot_key text NOT NULL,
                 	cbsd_id text NULL,
-                	base_coverage_points int8 NOT NULL,
-                	boosted_coverage_points int8 NOT NULL,
-                	base_reward_shares int8 NOT NULL,
-                	boosted_reward_shares int8 NOT NULL,
+                	base_coverage_points_sum numeric NOT NULL,
+                	boosted_coverage_points_sum numeric NOT NULL,
+                	base_reward_shares numeric NOT NULL,
+                	boosted_reward_shares numeric NOT NULL,
                 	base_poc_reward int8 NOT NULL,
                 	boosted_poc_reward int8 NOT NULL,
                 	seniority_ts timestamptz NOT NULL,
                 	coverage_object text NOT NULL,
-                	location_trust_score_multiplier int4 NOT NULL,
-                	speedtest_multiplier int4 NOT NULL,
+                	location_trust_score_multiplier numeric NOT NULL,
+                	speedtest_multiplier numeric NOT NULL,
                 	boosted_hex_status text NOT NULL
                 )
             "#,
@@ -117,7 +126,7 @@ impl DbTable for FileTypeMobileRewardShare {
                 CREATE TABLE IF NOT EXISTS location_trust_scores (
                     id bigint NOT NULL,
                     meters_to_asserted int8 NOT NULL,
-                    trust_score int4 NOT NULL
+                    trust_score numeric NOT NULL
                 )
             "#,
         )
@@ -140,17 +149,31 @@ impl DbTable for FileTypeMobileRewardShare {
 
         sqlx::query(
             r#"
+                CREATE TABLE IF NOT EXISTS speedtest_average (
+                    id bigint NOT NULL,
+                    upload int8 NOT NULL,
+                    download int8 NOT NULL,
+                    latency int4 NOT NULL,
+                    timestamp timestamptz NOT NULL
+                )
+            "#,
+        )
+        .execute(db)
+        .await?;
+
+        sqlx::query(
+            r#"
                 CREATE TABLE IF NOT EXISTS covered_hexes (
                     id bigint NOT NULL,
                     location int8 NOT NULL,
-                    base_coverage_points int8 NOT NULL,
-                    boosted_coverage_points int8 NOT NULL,
+                    base_coverage_points numeric NOT NULL,
+                    boosted_coverage_points numeric NOT NULL,
                     urbanized text NOT NULL,
                     footfall text NOT NULL,
                     landtype text NOT NULL,
-                    assignment_multiplier int4 NOT NULL,
+                    assignment_multiplier numeric NOT NULL,
                     rank int4 NOT NULL,
-                    rank_multiplier int4 NOT NULL,
+                    rank_multiplier numeric NOT NULL,
                     boosted_multiplier int4 NOT NULL
                 )
             "#,
@@ -186,6 +209,20 @@ impl DbTable for FileTypeMobileRewardShare {
 
         sqlx::query(
             r#"
+                CREATE TABLE IF NOT EXISTS mobile_promotion_rewards (
+                    start_period timestamptz not null,
+                    end_period timestamptz not null,
+                    entity text not null,
+                    service_provider_amount int8 not null,
+                    matched_amount int8 not null
+                )
+            "#,
+        )
+        .execute(db)
+        .await?;
+
+        sqlx::query(
+            r#"
                 CREATE TABLE IF NOT EXISTS mobile_unallocated_rewards (
                     reward_type text not null,
                     amount bigint not null,
@@ -201,7 +238,8 @@ impl DbTable for FileTypeMobileRewardShare {
             r#"
                 CREATE TABLE IF NOT EXISTS mobile_subscriber_rewards (
                 	subscriber_id bytea NOT NULL,
-                	amount int8 NOT NULL,
+                	disco_amount int8 NOT NULL,
+                	verification_amount int8 NOT NULL,
                 	start_period timestamptz NOT NULL,
                 	end_period timestamptz NOT NULL
                 )
@@ -265,12 +303,13 @@ impl Insertable for Vec<MobileRewardShare> {
                 .map(|_| ())?,
             Some(mobile_reward_share::Reward::SubscriberReward(sub)) => sqlx::query(
                     r#"
-                        INSERT INTO mobile_subscriber_rewards(subscriber_id, amount, start_period, end_period)
-                        VALUES($1,$2,$3,$4)
+                        INSERT INTO mobile_subscriber_rewards(subscriber_id, disco_amount, verification_amount, start_period, end_period)
+                        VALUES($1,$2,$3,$4,$5)
                     "#
                 )
                 .bind(sub.subscriber_id)
                 .bind(sub.discovery_location_amount as i64)
+                .bind(sub.verification_mapping_amount as i64)
                 .bind(to_datetime(share.start_period))
                 .bind(to_datetime(share.end_period))
                 .execute(pool)
@@ -285,6 +324,21 @@ impl Insertable for Vec<MobileRewardShare> {
                 .bind(service.amount as i64)
                 .bind(to_datetime(share.start_period))
                 .bind(to_datetime(share.end_period))
+                .execute(pool)
+                .await
+                .map(|_| ())?,
+            Some(mobile_reward_share::Reward::PromotionReward(promotion)) => sqlx::
+                query(
+                  r#"
+                    INSERT INTO mobile_promotion_rewards(start_period, end_period, entity, service_provider_amount, matched_amount)
+                    VALUES($1, $2, $3, $4, $5)
+                  "#
+                  )
+                .bind(to_datetime(share.start_period))
+                .bind(to_datetime(share.end_period))
+                .bind(&promotion.entity)
+                .bind(promotion.service_provider_amount as i64)
+                .bind(promotion.matched_amount as i64)
                 .execute(pool)
                 .await
                 .map(|_| ())?,
@@ -307,6 +361,12 @@ impl Insertable for Vec<MobileRewardShare> {
     }
 }
 
+fn from_proto_decimal(opt: Option<&helium_proto::Decimal>) -> Decimal {
+    opt.ok_or_else(|| anyhow::anyhow!("decimal not present"))
+        .and_then(|d| Decimal::from_str(&d.value).map_err(anyhow::Error::from))
+        .unwrap_or_default()
+}
+
 async fn insert_radio_reward_v2(
     pool: &Pool<Postgres>,
     reward: proto::RadioRewardV2,
@@ -315,9 +375,8 @@ async fn insert_radio_reward_v2(
 ) -> anyhow::Result<()> {
     let mut transaction = pool.begin().await?;
 
-    let row = 
-    sqlx::query(r#"
-        INSERT INTO mobile_radio_rewards_v2(start_period, end_period, hotspot_key, cbsd_id, base_coverage_points, boosted_coverage_points, base_reward_shares, boosted_reward_shares, base_poc_reward, boosted_poc_reward, seniority_ts, coverage_object, location_trust_score_multiplier, speedtest_multiplier, boosted_hex_status)
+    let row = sqlx::query(r#"
+        INSERT INTO mobile_radio_rewards_v2(start_period, end_period, hotspot_key, cbsd_id, base_coverage_points_sum, boosted_coverage_points_sum, base_reward_shares, boosted_reward_shares, base_poc_reward, boosted_poc_reward, seniority_ts, coverage_object, location_trust_score_multiplier, speedtest_multiplier, boosted_hex_status)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
         RETURNING id
         "#)
@@ -325,16 +384,16 @@ async fn insert_radio_reward_v2(
         .bind(end_period)
         .bind(PublicKeyBinary::from(reward.hotspot_key.as_slice()).to_string())
         .bind(&reward.cbsd_id)
-        .bind(reward.base_coverage_points as i64)
-        .bind(reward.boosted_coverage_points as i64)
-        .bind(reward.base_reward_shares as i64)
-        .bind(reward.boosted_reward_shares as i64)
+        .bind(from_proto_decimal(reward.base_coverage_points_sum.as_ref()))
+        .bind(from_proto_decimal(reward.boosted_coverage_points_sum.as_ref()))
+        .bind(from_proto_decimal(reward.base_reward_shares.as_ref()))
+        .bind(from_proto_decimal(reward.boosted_reward_shares.as_ref()))
         .bind(reward.base_poc_reward as i64)
         .bind(reward.boosted_poc_reward as i64)
         .bind(to_datetime(reward.seniority_timestamp))
         .bind(Uuid::from_slice(reward.coverage_object.as_slice())?)
-        .bind(reward.location_trust_score_multiplier as i64)
-        .bind(reward.speedtest_multiplier as i64)
+        .bind(from_proto_decimal(reward.location_trust_score_multiplier.as_ref()))
+        .bind(from_proto_decimal(reward.speedtest_multiplier.as_ref()))
         .bind(reward.boosted_hex_status().as_str_name())
         .fetch_one(&mut transaction)
         .await?;
@@ -343,34 +402,54 @@ async fn insert_radio_reward_v2(
 
     let num_in_batch: usize = (u16::MAX / 3) as usize;
     for chunk in reward.location_trust_scores.chunks(num_in_batch) {
-        QueryBuilder::new(r#"
+        QueryBuilder::new(
+            r#"
             INSERT INTO location_trust_scores(id, meters_to_asserted, trust_score)
-            "#)
-            .push_values(chunk, |mut b, lt| {
-                 b.push_bind(id)
+            "#,
+        )
+        .push_values(chunk, |mut b, lt| {
+            b.push_bind(id)
                 .push_bind(lt.meters_to_asserted as i64)
-                .push_bind(lt.trust_score as i64);
-            })
-            .build()
-            .execute(&mut transaction)
-            .await?;
+                .push_bind(from_proto_decimal(lt.trust_score.as_ref()));
+        })
+        .build()
+        .execute(&mut transaction)
+        .await?;
     }
 
     let num_in_batch: usize = (u16::MAX / 5) as usize;
     for chunk in reward.speedtests.chunks(num_in_batch) {
-        QueryBuilder::new(r#"
+        QueryBuilder::new(
+            r#"
             INSERT INTO speedtests(id, upload, download, latency, timestamp)
-            "#)
-            .push_values(chunk, |mut b, st| {
-                b.push_bind(id)
+            "#,
+        )
+        .push_values(chunk, |mut b, st| {
+            b.push_bind(id)
                 .push_bind(st.upload_speed_bps as i64)
                 .push_bind(st.download_speed_bps as i64)
                 .push_bind(st.latency_ms as i32)
                 .push_bind(to_datetime(st.timestamp));
-            })
-            .build()
-            .execute(&mut transaction)
-            .await?;
+        })
+        .build()
+        .execute(&mut transaction)
+        .await?;
+    }
+
+    if let Some(avg) = reward.speedtest_average {
+        sqlx::query(
+            r#"
+                INSERT INTO speedtest_average(id, upload, download, latency, timestamp)
+                VALUES($1,$2,$3,$4,$5)
+            "#,
+        )
+        .bind(id)
+        .bind(avg.upload_speed_bps as i64)
+        .bind(avg.download_speed_bps as i64)
+        .bind(avg.latency_ms as i32)
+        .bind(to_datetime(avg.timestamp))
+        .execute(&mut transaction)
+        .await?;
     }
 
     let num_in_batch: usize = (u16::MAX / 11) as usize;
@@ -381,14 +460,14 @@ async fn insert_radio_reward_v2(
             .push_values(chunk, |mut b, h| {
                 b.push_bind(id)
                 .push_bind(h.location as i64)
-                .push_bind(h.base_coverage_points as i64)
-                .push_bind(h.boosted_coverage_points as i64)
+                .push_bind(from_proto_decimal(h.base_coverage_points.as_ref()))
+                .push_bind(from_proto_decimal(h.boosted_coverage_points.as_ref()))
                 .push_bind(h.urbanized().as_str_name())
                 .push_bind(h.footfall().as_str_name())
                 .push_bind(h.landtype().as_str_name())
-                .push_bind(h.assignment_multiplier as i32)
+                .push_bind(from_proto_decimal(h.assignment_multiplier.as_ref()))
                 .push_bind(h.rank as i32)
-                .push_bind(h.rank_multiplier as i32)
+                .push_bind(from_proto_decimal(h.rank_multiplier.as_ref()))
                 .push_bind(h.boosted_multiplier as i32);
             })
             .build()

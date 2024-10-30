@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use clap::Parser;
 
 use h3o::{CellIndex, LatLng};
-use oracle_persist::commands::{clean::Clean, import::Import};
+use oracle_persist::commands::{animal_names::AnimalNames, clean::Clean, import::Import};
 use rust_decimal::{prelude::ToPrimitive, Decimal};
 use sqlx::Row;
 
@@ -18,6 +18,7 @@ enum Cmd {
     Clean(Clean),
     AssertedDistance(AssertedDistance),
     ToHex(ToHex),
+    AnimalNames(AnimalNames),
 }
 
 #[derive(Debug, clap::Args)]
@@ -99,6 +100,7 @@ impl Cmd {
             Cmd::Clean(clean) => clean.run().await,
             Cmd::AssertedDistance(asserted_distance) => asserted_distance.run().await,
             Cmd::ToHex(to_hex) => to_hex.run().await,
+            Cmd::AnimalNames(an) => an.run().await,
         }
     }
 }
@@ -114,7 +116,9 @@ async fn main() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use angry_purple_tiger::AnimalName;
     use h3o::LatLng;
+    use sqlx::{postgres::PgPoolOptions, Row};
 
     #[test]
     fn brian() -> anyhow::Result<()> {
@@ -125,6 +129,31 @@ mod tests {
 
         let d = co_ll.distance_m(hb_ll);
         dbg!(d);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn animal_names() -> anyhow::Result<()> {
+        let pool = PgPoolOptions::new()
+            .max_connections(5)
+            .connect("postgres://postgres:postgres@localhost/hip_125")
+            .await?;
+
+        let result = sqlx::query("select public_key from wifi_tower_analysis")
+            .fetch_all(&pool)
+            .await?;
+
+        for row in result {
+            let pk = row.get::<String, &str>("public_key");
+            let animal_name = pk.parse::<AnimalName>()?;
+
+            sqlx::query("update wifi_tower_analysis set animal_name = $1 where public_key = $2")
+                .bind(animal_name.to_string())
+                .bind(pk)
+                .execute(&pool)
+                .await?;
+        }
 
         Ok(())
     }

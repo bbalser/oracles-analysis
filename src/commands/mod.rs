@@ -2,6 +2,7 @@ use chrono::{DateTime, NaiveDateTime, Utc};
 use file_store::FileStore;
 use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
 
+pub mod animal_names;
 pub mod clean;
 pub mod import;
 

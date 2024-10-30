@@ -4,6 +4,7 @@ use cell_speedtest_ingest::FileTypeCellSpeedtestIngestReport;
 use chrono::{DateTime, TimeZone, Utc};
 use clap::ValueEnum;
 use coverage_object::FileTypeCoverageObject;
+use data_transfer_session_ingest::FileTypeDataTransferSessionIngestReport;
 use file_store::BytesMutStream;
 use iot_reward_share::FileTypeIotRewardShare;
 use mobile_reward_share::FileTypeMobileRewardShare;
@@ -19,6 +20,7 @@ mod cbrs_heartbeat_ingest;
 mod cell_speedtest_ingest;
 pub mod commands;
 mod coverage_object;
+mod data_transfer_session_ingest;
 mod iot_reward_share;
 mod mobile_reward_share;
 mod oracle_boosting;
@@ -33,6 +35,7 @@ pub enum SupportedFileTypes {
     CbrsHeartbeatIngestReport,
     CellSpeedtestIngestReport,
     CoverageObject,
+    DataTransferSessionIngestReport,
     IotRewardShare,
     MobileRewardShare,
     OracleBoostingReport,
@@ -57,6 +60,9 @@ impl SupportedFileTypes {
                 Box::new(FileTypeCellSpeedtestIngestReport {})
             }
             SupportedFileTypes::CoverageObject => Box::new(FileTypeCoverageObject {}),
+            SupportedFileTypes::DataTransferSessionIngestReport => {
+                Box::new(FileTypeDataTransferSessionIngestReport)
+            }
             SupportedFileTypes::InvalidatedRadioThreshold => {
                 Box::new(FileTypeInvalidatedRadioThreshold {})
             }
@@ -125,48 +131,109 @@ pub fn to_optional_datetime(timestamp: u64) -> Option<DateTime<Utc>> {
 
 #[cfg(test)]
 mod tests {
-    use std::fs::File;
+    use std::str::FromStr;
 
-    use apache_avro::{from_value, Reader};
-    use serde::Deserialize;
-    use uuid::Uuid;
-
-    #[derive(Clone, Debug, Deserialize)]
-    pub struct CdrRaw {
-        pub id: String,
-        pub cdr_type: String,
-        pub record_type: i16,
-        // The time the record was written by T-Mobile
-        pub creation_time: String,
-        // The time the record was harvested from the FTP
-        pub created_at: String,
-        pub imsi: String,
-        pub msisdn: String,
-        pub imei: String,
-        pub total_volume: Option<f64>,
-        pub uplink_volume: Option<f64>,
-        pub downlink_volume: Option<f64>,
-        pub call_time_min: Option<i64>,
-        pub agw_sn: Option<String>,
-        pub subscriber_id: Option<Uuid>,
-        pub cbsd_id: Option<String>,
-    }
+    use geo::{Contains, Point};
+    use geojson::GeoJson;
+    use h3o::{CellIndex, LatLng};
+    use sqlx::{postgres::PgPoolOptions, Row};
+    use tokio::fs;
 
     #[tokio::test]
     async fn brian() -> anyhow::Result<()> {
-        let f = File::open("hm-wifirecords-20240424161927.dat")?;
-        let reader = Reader::new(f)?;
+        let pool = PgPoolOptions::new()
+            .max_connections(5)
+            .connect(
+                "postgres://novareadonly:Bt2Emvd-KKP*LR4sz-DCNMru@localhost:3310/mobile_verifier",
+            )
+            .await?;
 
-        let value = reader.into_iter().next().unwrap()?;
-        dbg!(&value);
-        let cdr = from_value::<CdrRaw>(&value)?;
-        dbg!(cdr);
+        let rows = sqlx::query(r#"
+            SELECT *
+            from wifi_heartbeats
+            where hotspot_key = '1trSusf1ZNK9urSaTVpiTYYXZYwPusjP5cimH2oDceMAGJAM4PYm4Ucqt4N9okqeZqWEfaHk4si3niQCsxHNBDdgTVv4gq8tcjVe44h5nKaWxXZDXKzdAxUeLxycJUAdNwZDV8GHmMAgBAQvZF5mh6gdZwRztHjoTCPZZEL7vkcG47HixfrV2bPySsuXtre4ZD3QQXZt8a7v1hLR7FxhUu5ouDebFEcbMTXHPoBTHwTs2XJtS6hsfEwdVNxUN6zi6rFJR8sG7bRphh9pRHjEbhT4ESjWSu98CwGpcSf2u88Fr3A9cCpiiyCtjMJReBVkNMbWYGN4SCU2qeeid57bDCThfFCZ6KQMQyH6VNsGMpCw8J'
+            "#)
+        .fetch_all(&pool).await?;
 
-        // for value in reader {
-        //     dbg!(&value);
-        //     let cdr = from_value::<Cdr>(&value.unwrap())?;
-        //     dbg!(cdr);
-        // }
+        let hexes: Vec<CellIndex> = sqlx::query_scalar::<_, i64>(r#"
+            SELECT h.hex
+            FROM coverage_objects co 
+                inner join hexes h on co.uuid = h.uuid
+            where co.radio_key = '1trSusf1ZNK9urSaTVpiTYYXZYwPusjP5cimH2oDceMAGJAM4PYm4Ucqt4N9okqeZqWEfaHk4si3niQCsxHNBDdgTVv4gq8tcjVe44h5nKaWxXZDXKzdAxUeLxycJUAdNwZDV8GHmMAgBAQvZF5mh6gdZwRztHjoTCPZZEL7vkcG47HixfrV2bPySsuXtre4ZD3QQXZt8a7v1hLR7FxhUu5ouDebFEcbMTXHPoBTHwTs2XJtS6hsfEwdVNxUN6zi6rFJR8sG7bRphh9pRHjEbhT4ESjWSu98CwGpcSf2u88Fr3A9cCpiiyCtjMJReBVkNMbWYGN4SCU2qeeid57bDCThfFCZ6KQMQyH6VNsGMpCw8J'
+            "#)
+        .fetch_all(&pool)
+        .await?
+        .into_iter()
+        .map(|i| CellIndex::try_from(i as u64))
+        .collect::<Result<_,_>>()?;
+
+        for row in rows {
+            let lat = row.get::<f64, &str>("lat");
+            let lon = row.get::<f64, &str>("lon");
+
+            let ll: LatLng = LatLng::new(lat, lon)?
+                .to_cell(h3o::Resolution::Twelve)
+                .into();
+
+            let max_m: f64 = hexes.iter().fold(0.0, |curr_max, curr_cov| {
+                let cov = LatLng::from(*curr_cov);
+                curr_max.max(cov.distance_m(ll))
+            });
+
+            dbg!(max_m);
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn alaska() -> anyhow::Result<()> {
+        let geojson_str = fs::read_to_string("alaska.geojson").await?;
+        let feature: geojson::Feature = GeoJson::from_str(&geojson_str)?.try_into()?;
+        let alaska: geo::Geometry = feature.geometry.unwrap().try_into()?;
+
+        let pool = PgPoolOptions::new()
+            .max_connections(5)
+            .connect("posgres://postgres:postgres@localhost/alaska")
+            .await?;
+
+        let rows = sqlx::query(
+            r#"
+                WITH latest_assertions AS (
+                	SELECT DISTINCT ON (serialnumber) *
+                	FROM hotspot_assertions ha 
+                	ORDER BY serialnumber, time DESC
+                )
+                SELECT la.*
+                FROM sp_boosted_rewards_bans bans
+                	INNER JOIN wifi_hotspots wh ON wh.public_key = bans.radio_key
+                	INNER JOIN latest_assertions la ON wh.serialnumber = la.serialnumber
+                WHERE bans.invalidated_at IS NULL
+                	AND bans.radio_type = 'wifi'
+            "#,
+        )
+        .fetch_all(&pool)
+        .await?;
+
+        for row in rows {
+            let serialnumber = row.get::<String, &str>("serialnumber");
+            let lat = row.get::<f64, &str>("latitude");
+            let lon = row.get::<f64, &str>("longitude");
+
+            let p: Point = (lon, lat).into();
+
+            let result = alaska.contains(&p);
+
+            sqlx::query(
+                r#"
+                INSERT INTO alaska(serialnumber, in_alaska) values($1, $2)
+            "#,
+            )
+            .bind(serialnumber)
+            .bind(result)
+            .execute(&pool)
+            .await?;
+        }
 
         Ok(())
     }
