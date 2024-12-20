@@ -31,13 +31,14 @@ impl Import {
 
         for file_info in file_infos {
             println!("processing file: {}", file_info);
+            let file_timestamp = file_info.timestamp;
 
             let bytes_stream = store.stream_file(file_info).await?;
 
             self.file_type
                 .decode(bytes_stream)
                 .await?
-                .insert(&db)
+                .insert(&db, file_timestamp)
                 .await?;
         }
 

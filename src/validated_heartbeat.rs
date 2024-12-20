@@ -1,7 +1,11 @@
+use std::str::FromStr;
+
+use chrono::{DateTime, Utc};
 use file_store::{heartbeat::cli::ValidatedHeartbeat, traits::MsgDecode, BytesMutStream, FileType};
 use futures::TryStreamExt;
-use helium_crypto::PublicKey;
+use helium_crypto::{PublicKey, PublicKeyBinary};
 use sqlx::{Pool, Postgres, QueryBuilder};
+use uuid::Uuid;
 
 use crate::{DbTable, Decode, Insertable, ToPrefix};
 
@@ -45,7 +49,8 @@ impl DbTable for FileTypeValidatedHeartbeat {
                     location_trust_score_multiplier int4,
                     timestamp timestamptz,
                     lat numeric,
-                    lon numeric
+                    lon numeric,
+                    coverage_object text
                 )
             "#,
         )
@@ -58,14 +63,19 @@ impl DbTable for FileTypeValidatedHeartbeat {
 
 #[async_trait::async_trait]
 impl Insertable for Vec<ValidatedHeartbeat> {
-    async fn insert(&self, pool: &Pool<Postgres>) -> anyhow::Result<()> {
+    async fn insert(
+        &self,
+        pool: &Pool<Postgres>,
+        _file_timestamp: DateTime<Utc>,
+    ) -> anyhow::Result<()> {
         const NUM_IN_BATCH: usize = (u16::MAX / 11) as usize;
 
-        let hbs: Vec<&ValidatedHeartbeat> =
-            self.iter().filter(|hb| hb.cbsd_id.len() == 0).collect();
+        let pubkey = PublicKeyBinary::from_str("1trSusex4JifCNu9Sg7m4KzNMN9E6z2J6UShifBaxZcCTUwYsKfczsnhHFn12RXJeEpF4AKhgYn9ksvFHAKVMt8k7tD2hLfNUEefg6nd2KJGoBdXhnosHVXvtagzCWqJxrzZEa89P3YZq18FxQxBeES5P6dphZ2nXd3K2CYRJ5FobijkfY2HHMyVhH51xMTXV8cuUGAXHv5h8SbKY1qpxVMrppXuKDFhXiH1P3DVVKnhw4JLWQDFr1oVNoxENpV7iYDEe77AYmUq2qUkrRD2qjmBKSny25hW5mfxRsg7D1jGZNKfLY1aoVomqnPa51zaXa5T2vtQRidQAXAvd1wvvy1jza13gAAAJrKcGYuFdbpTkM")?;
+
+        let hbs: Vec<&ValidatedHeartbeat> = self.iter().filter(|hb| hb.pub_key == pubkey).collect();
 
         for chunk in hbs.chunks(NUM_IN_BATCH) {
-            let mut qb = QueryBuilder::new("INSERT INTO mobile_validated_heartbeats(hotspot_key, cbsd_id, reward_multiplier, cell_type, validity, location_validation_timestamp, distance_to_asserted, timestamp, location_trust_score_multiplier, lat, lon)");
+            let mut qb = QueryBuilder::new("INSERT INTO mobile_validated_heartbeats(hotspot_key, cbsd_id, reward_multiplier, cell_type, validity, location_validation_timestamp, distance_to_asserted, timestamp, location_trust_score_multiplier, lat, lon, coverage_object)");
 
             qb.push_values(chunk, |mut b, hb| {
                 b.push_bind(PublicKey::try_from(hb.pub_key.clone()).unwrap().to_string())
@@ -78,7 +88,12 @@ impl Insertable for Vec<ValidatedHeartbeat> {
                     .push_bind(hb.timestamp)
                     .push_bind(hb.location_trust_score_multiplier as i64)
                     .push_bind(hb.lat)
-                    .push_bind(hb.lon);
+                    .push_bind(hb.lon)
+                    .push_bind(
+                        Uuid::from_slice(hb.coverage_object.as_slice())
+                            .expect("inavlid uuid")
+                            .to_string(),
+                    );
             })
             .build()
             .execute(pool)

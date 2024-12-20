@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use file_store::{BytesMutStream, FileType};
 use futures::TryStreamExt;
 use helium_crypto::PublicKey;
@@ -59,7 +60,11 @@ impl DbTable for FileTypeRadioThreshold {
 
 #[async_trait::async_trait]
 impl Insertable for Vec<VerifiedRadioThresholdIngestReportV1> {
-    async fn insert(&self, db: &Pool<Postgres>) -> anyhow::Result<()> {
+    async fn insert(
+        &self,
+        db: &Pool<Postgres>,
+        _file_timestamp: DateTime<Utc>,
+    ) -> anyhow::Result<()> {
         const NUM_IN_BATCH: usize = (u16::MAX / 6) as usize;
 
         for chunk in self.chunks(NUM_IN_BATCH) {
@@ -138,7 +143,11 @@ impl DbTable for FileTypeInvalidatedRadioThreshold {
 
 #[async_trait::async_trait]
 impl Insertable for Vec<VerifiedInvalidatedRadioThresholdIngestReportV1> {
-    async fn insert(&self, db: &Pool<Postgres>) -> anyhow::Result<()> {
+    async fn insert(
+        &self,
+        db: &Pool<Postgres>,
+        _file_timestamp: DateTime<Utc>,
+    ) -> anyhow::Result<()> {
         const NUM_IN_BATCH: usize = (u16::MAX / 6) as usize;
 
         for chunk in self.chunks(NUM_IN_BATCH) {

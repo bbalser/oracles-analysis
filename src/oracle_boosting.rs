@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use file_store::{BytesMutStream, FileType};
 use futures::TryStreamExt;
 use helium_proto::{services::poc_mobile::OracleBoostingReportV1, Message};
@@ -52,7 +53,11 @@ impl DbTable for FileTypeOracleBoostingReport {
 
 #[async_trait::async_trait]
 impl Insertable for Vec<OracleBoostingReportV1> {
-    async fn insert(&self, db: &Pool<Postgres>) -> anyhow::Result<()> {
+    async fn insert(
+        &self,
+        db: &Pool<Postgres>,
+        _file_timestamp: DateTime<Utc>,
+    ) -> anyhow::Result<()> {
         const NUM_IN_BATCH: usize = (u16::MAX / 5) as usize;
 
         let rows: Vec<_> = self
@@ -64,7 +69,7 @@ impl Insertable for Vec<OracleBoostingReportV1> {
                 report
                     .assignments
                     .iter()
-                    .map(move |assignment| (uuid.clone(), timestamp.clone(), assignment))
+                    .map(move |assignment| (uuid, timestamp, assignment))
             })
             .collect();
 

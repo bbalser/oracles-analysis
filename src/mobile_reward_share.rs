@@ -38,14 +38,9 @@ impl Decode for FileTypeMobileRewardShare {
     async fn decode(&self, stream: BytesMutStream) -> anyhow::Result<Box<dyn Insertable>> {
         let reports = stream
             .map_err(anyhow::Error::from)
-            .and_then(|buf| async move {
-                // let length = buf.len();
-                MobileRewardShare::decode(buf).map_err(anyhow::Error::from)
-                // let proto = share.unwrap();
-                // if let Some(mobile_reward_share::Reward::RadioRewardV2(reward)) = proto.clone().reward {
-                //     println!("buf len: {}, covered_hexes: {}", length, reward.covered_hexes.len());
-                // }
-            })
+            .and_then(
+                |buf| async move { MobileRewardShare::decode(buf).map_err(anyhow::Error::from) },
+            )
             .try_collect::<Vec<_>>()
             .await?;
 
@@ -114,7 +109,8 @@ impl DbTable for FileTypeMobileRewardShare {
                 	coverage_object text NOT NULL,
                 	location_trust_score_multiplier numeric NOT NULL,
                 	speedtest_multiplier numeric NOT NULL,
-                	boosted_hex_status text NOT NULL
+                	sp_boosted_hex_status text NOT NULL,
+                	oracle_boosted_hex_status text NOT NULL
                 )
             "#,
         )
@@ -187,7 +183,9 @@ impl DbTable for FileTypeMobileRewardShare {
                 	hotspot_key text NOT NULL,
                 	amount int8 NOT NULL,
                 	start_period timestamptz NOT NULL,
-                	end_period timestamptz NOT NULL
+                	end_period timestamptz NOT NULL,
+                	price int8 NOT NULL,
+                	file_timestamp timestamptz
                 )
             "#,
         )
@@ -255,49 +253,55 @@ impl DbTable for FileTypeMobileRewardShare {
 #[async_trait::async_trait]
 impl Insertable for Vec<MobileRewardShare> {
     #[allow(deprecated)]
-    async fn insert(&self, pool: &Pool<Postgres>) -> anyhow::Result<()> {
+    async fn insert(
+        &self,
+        pool: &Pool<Postgres>,
+        file_timestamp: DateTime<Utc>,
+    ) -> anyhow::Result<()> {
         for share in self {
             match share.reward.clone() {
             Some(mobile_reward_share::Reward::RadioReward(radio)) => {
-                let boosted_hexes: Vec<BoostedHex> = radio.boosted_hexes.into_iter()
-                    .map(|h| BoostedHex {
-                        location: h.location as i64,
-                        multiplier: h.multiplier as i32,
-                    }).collect();
+                    let boosted_hexes: Vec<BoostedHex> = radio.boosted_hexes.into_iter()
+                        .map(|h| BoostedHex {
+                            location: h.location as i64,
+                            multiplier: h.multiplier as i32,
+                        }).collect();
 
-                sqlx::query(
-                    r#"
-                        INSERT INTO mobile_radio_rewards(hotspot_key, cbsd_id, coverage_points, amount, start_period, end_period, transfer_amount, boosted_hexes, location_trust_score_multiplier, speedtest_multiplier)
-                        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-                    "#,
-                )
-                .bind(PublicKey::try_from(radio.hotspot_key)?.to_string())
-                .bind(radio.cbsd_id)
-                .bind(radio.coverage_points as i64)
-                .bind(radio.poc_reward as i64)
-                .bind(to_datetime(share.start_period))
-                .bind(to_datetime(share.end_period))
-                .bind(radio.dc_transfer_reward as i64)
-                .bind(boosted_hexes)
-                .bind(radio.location_trust_score_multiplier as i32)
-                .bind(radio.speedtest_multiplier as i32)
-                .execute(pool)
-                .await
-                .map(|_| ())?
+                    sqlx::query(
+                        r#"
+                            INSERT INTO mobile_radio_rewards(hotspot_key, cbsd_id, coverage_points, amount, start_period, end_period, transfer_amount, boosted_hexes, location_trust_score_multiplier, speedtest_multiplier)
+                            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+                        "#,
+                    )
+                    .bind(PublicKey::try_from(radio.hotspot_key)?.to_string())
+                    .bind(radio.cbsd_id)
+                    .bind(radio.coverage_points as i64)
+                    .bind(radio.poc_reward as i64)
+                    .bind(to_datetime(share.start_period))
+                    .bind(to_datetime(share.end_period))
+                    .bind(radio.dc_transfer_reward as i64)
+                    .bind(boosted_hexes)
+                    .bind(radio.location_trust_score_multiplier as i32)
+                    .bind(radio.speedtest_multiplier as i32)
+                    .execute(pool)
+                    .await
+                    .map(|_| ())?
             }
             Some(mobile_reward_share::Reward::RadioRewardV2(reward)) => {
                 insert_radio_reward_v2(pool, reward, to_datetime(share.start_period), to_datetime(share.end_period)).await?
             }
             Some(mobile_reward_share::Reward::GatewayReward(gateway)) => sqlx::query(
                     r#"
-                        INSERT INTO mobile_gateway_rewards(hotspot_key, amount, start_period, end_period)
-                        VALUES($1, $2, $3, $4)
+                        INSERT INTO mobile_gateway_rewards(hotspot_key, amount, start_period, end_period, price, file_timestamp)
+                        VALUES($1, $2, $3, $4, $5, $6)
                     "#,
                 )
                 .bind(PublicKey::try_from(gateway.hotspot_key)?.to_string())
                 .bind(gateway.dc_transfer_reward as i64)
                 .bind(to_datetime(share.start_period))
                 .bind(to_datetime(share.end_period))
+                .bind(gateway.price as i64)
+                .bind(file_timestamp)
                 .execute(pool)
                 .await
                 .map(|_| ())?,
@@ -342,7 +346,9 @@ impl Insertable for Vec<MobileRewardShare> {
                 .execute(pool)
                 .await
                 .map(|_| ())?,
-            Some(mobile_reward_share::Reward::UnallocatedReward(unallocated)) => sqlx::query(
+            Some(mobile_reward_share::Reward::UnallocatedReward(unallocated)) => {
+                dbg!(&unallocated);
+                sqlx::query(
                 r#"
                     INSERT INTO mobile_unallocated_rewards(reward_type, amount, start_period, end_period) VALUES($1,$2,$3,$4)
                 "#
@@ -353,8 +359,8 @@ impl Insertable for Vec<MobileRewardShare> {
                 .bind(to_datetime(share.end_period))
                 .execute(pool)
                 .await
-                .map(|_| ())?,
-            _ => (),
+                .map(|_| ())?},
+            _ => ()
         };
         }
         Ok(())
@@ -376,8 +382,8 @@ async fn insert_radio_reward_v2(
     let mut transaction = pool.begin().await?;
 
     let row = sqlx::query(r#"
-        INSERT INTO mobile_radio_rewards_v2(start_period, end_period, hotspot_key, cbsd_id, base_coverage_points_sum, boosted_coverage_points_sum, base_reward_shares, boosted_reward_shares, base_poc_reward, boosted_poc_reward, seniority_ts, coverage_object, location_trust_score_multiplier, speedtest_multiplier, boosted_hex_status)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+        INSERT INTO mobile_radio_rewards_v2(start_period, end_period, hotspot_key, cbsd_id, base_coverage_points_sum, boosted_coverage_points_sum, base_reward_shares, boosted_reward_shares, base_poc_reward, boosted_poc_reward, seniority_ts, coverage_object, location_trust_score_multiplier, speedtest_multiplier, sp_boosted_hex_status, oracle_boosted_hex_status)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
         RETURNING id
         "#)
         .bind(start_period)
@@ -394,7 +400,8 @@ async fn insert_radio_reward_v2(
         .bind(Uuid::from_slice(reward.coverage_object.as_slice())?)
         .bind(from_proto_decimal(reward.location_trust_score_multiplier.as_ref()))
         .bind(from_proto_decimal(reward.speedtest_multiplier.as_ref()))
-        .bind(reward.boosted_hex_status().as_str_name())
+        .bind(reward.sp_boosted_hex_status().as_str_name())
+        .bind(reward.oracle_boosted_hex_status().as_str_name())
         .fetch_one(&mut transaction)
         .await?;
 

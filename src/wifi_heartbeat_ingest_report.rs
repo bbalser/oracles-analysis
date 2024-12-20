@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use file_store::{
     traits::MsgDecode, wifi_heartbeat::WifiHeartbeatIngestReport, BytesMutStream, FileType,
 };
@@ -57,7 +58,11 @@ impl DbTable for FileTypeWifiHeartbeatIngestReport {
 
 #[async_trait::async_trait]
 impl Insertable for Vec<WifiHeartbeatIngestReport> {
-    async fn insert(&self, db: &Pool<Postgres>) -> anyhow::Result<()> {
+    async fn insert(
+        &self,
+        db: &Pool<Postgres>,
+        _file_timestamp: DateTime<Utc>,
+    ) -> anyhow::Result<()> {
         const NUM_IN_BATCH: usize = (u16::MAX / 8) as usize;
 
         for chunk in self.chunks(NUM_IN_BATCH) {

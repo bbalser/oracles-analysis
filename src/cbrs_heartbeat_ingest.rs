@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use file_store::{
     heartbeat::CbrsHeartbeatIngestReport, traits::MsgDecode, BytesMutStream, FileType,
 };
@@ -59,7 +60,11 @@ impl DbTable for FileTypeCbrsHeartbeatIngestReport {
 
 #[async_trait::async_trait]
 impl Insertable for Vec<CbrsHeartbeatIngestReport> {
-    async fn insert(&self, db: &Pool<Postgres>) -> anyhow::Result<()> {
+    async fn insert(
+        &self,
+        db: &Pool<Postgres>,
+        _file_timestamp: DateTime<Utc>,
+    ) -> anyhow::Result<()> {
         const NUM_IN_BATCH: usize = (u16::MAX / 11) as usize;
 
         for chunk in self.chunks(NUM_IN_BATCH) {

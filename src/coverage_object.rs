@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use file_store::{BytesMutStream, FileType};
 use futures::TryStreamExt;
 use helium_crypto::PublicKey;
@@ -39,6 +40,7 @@ impl DbTable for FileTypeCoverageObject {
         sqlx::query(
             r#"
                 CREATE TABLE IF NOT EXISTS coverage_objects (
+                    file_timestamp timestamptz not null,
                     radio_key text not null,
                     radio_type text not null,
                     uuid text not null,
@@ -56,7 +58,11 @@ impl DbTable for FileTypeCoverageObject {
 
 #[async_trait::async_trait]
 impl Insertable for Vec<CoverageObjectV1> {
-    async fn insert(&self, db: &Pool<Postgres>) -> anyhow::Result<()> {
+    async fn insert(
+        &self,
+        db: &Pool<Postgres>,
+        file_timestamp: DateTime<Utc>,
+    ) -> anyhow::Result<()> {
         for object in self {
             let co = object.coverage_object.clone().unwrap();
             let (radio_key, radio_type) = match co.key_type.unwrap() {
@@ -69,10 +75,11 @@ impl Insertable for Vec<CoverageObjectV1> {
             let uuid = uuid::Uuid::from_slice(&co.uuid)?;
             sqlx::query(
                 r#"
-                INSERT INTO coverage_objects(radio_key, radio_type, uuid, coverage_claim_time, indoor)
-                VALUES ($1,$2,$3,$4,$5)
+                INSERT INTO coverage_objects(file_timestamp,radio_key, radio_type, uuid, coverage_claim_time, indoor)
+                VALUES ($1,$2,$3,$4,$5,$6)
                 "#,
             )
+            .bind(file_timestamp)
             .bind(radio_key)
             .bind(radio_type)
             .bind(uuid)

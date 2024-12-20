@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use file_store::{BytesMutStream, FileType};
 use futures::TryStreamExt;
 use helium_crypto::PublicKeyBinary;
@@ -57,7 +58,11 @@ impl DbTable for FileTypeDataTransferSessionIngestReport {
 
 #[async_trait::async_trait]
 impl Insertable for Vec<DataTransferSessionIngestReportV1> {
-    async fn insert(&self, db: &Pool<Postgres>) -> anyhow::Result<()> {
+    async fn insert(
+        &self,
+        db: &Pool<Postgres>,
+        _file_timestamp: DateTime<Utc>,
+    ) -> anyhow::Result<()> {
         const NUM_IN_BATCH: usize = (u16::MAX / 9) as usize;
 
         for chunk in self.chunks(NUM_IN_BATCH) {

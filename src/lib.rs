@@ -10,6 +10,7 @@ use iot_reward_share::FileTypeIotRewardShare;
 use mobile_reward_share::FileTypeMobileRewardShare;
 use oracle_boosting::FileTypeOracleBoostingReport;
 use radio_thresholds::{FileTypeInvalidatedRadioThreshold, FileTypeRadioThreshold};
+use seniority_update::FileTypeSeniorityUpdate;
 use sqlx::{Pool, Postgres};
 use valid_data_transfer_session::FileTypeValidDataTransferSession;
 use validated_heartbeat::FileTypeValidatedHeartbeat;
@@ -25,6 +26,7 @@ mod iot_reward_share;
 mod mobile_reward_share;
 mod oracle_boosting;
 mod radio_thresholds;
+mod seniority_update;
 mod valid_data_transfer_session;
 mod validated_heartbeat;
 mod wifi_heartbeat_ingest_report;
@@ -41,6 +43,7 @@ pub enum SupportedFileTypes {
     OracleBoostingReport,
     RadioThreshold,
     InvalidatedRadioThreshold,
+    SeniorityUpdate,
     ValidatedHeartbeat,
     ValidDataTransferSession,
     WifiHeartbeatIngestReport,
@@ -70,6 +73,7 @@ impl SupportedFileTypes {
             SupportedFileTypes::MobileRewardShare => Box::new(FileTypeMobileRewardShare {}),
             SupportedFileTypes::OracleBoostingReport => Box::new(FileTypeOracleBoostingReport {}),
             SupportedFileTypes::RadioThreshold => Box::new(FileTypeRadioThreshold {}),
+            SupportedFileTypes::SeniorityUpdate => Box::new(FileTypeSeniorityUpdate),
             SupportedFileTypes::ValidDataTransferSession => {
                 Box::new(FileTypeValidDataTransferSession)
             }
@@ -100,7 +104,11 @@ pub trait Decode {
 
 #[async_trait::async_trait]
 pub trait Insertable {
-    async fn insert(&self, db: &Pool<Postgres>) -> anyhow::Result<()>;
+    async fn insert(
+        &self,
+        db: &Pool<Postgres>,
+        file_timestamp: DateTime<Utc>,
+    ) -> anyhow::Result<()>;
 }
 
 pub trait ToPrefix {

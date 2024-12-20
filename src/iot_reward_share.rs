@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use file_store::{BytesMutStream, FileType};
 use futures::TryStreamExt;
 use helium_crypto::PublicKey;
@@ -69,7 +70,11 @@ impl DbTable for FileTypeIotRewardShare {
 #[async_trait::async_trait]
 impl Insertable for Vec<IotRewardShare> {
     #[allow(deprecated)]
-    async fn insert(&self, pool: &Pool<Postgres>) -> anyhow::Result<()> {
+    async fn insert(
+        &self,
+        pool: &Pool<Postgres>,
+        _file_timestamp: DateTime<Utc>,
+    ) -> anyhow::Result<()> {
         for share in self {
             match &share.reward {
             Some(iot_reward_share::Reward::GatewayReward(gateway)) => sqlx::query(

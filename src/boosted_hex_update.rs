@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use file_store::{BytesMutStream, FileType};
 use futures::TryStreamExt;
 use helium_proto::{BoostedHexUpdateV1, Message};
@@ -54,7 +55,11 @@ impl DbTable for FileTypeBoostedHexUpdate {
 
 #[async_trait::async_trait]
 impl Insertable for Vec<BoostedHexUpdateV1> {
-    async fn insert(&self, db: &Pool<Postgres>) -> anyhow::Result<()> {
+    async fn insert(
+        &self,
+        db: &Pool<Postgres>,
+        _file_timestamp: DateTime<Utc>,
+    ) -> anyhow::Result<()> {
         for report in self {
             let update = report.clone().update.unwrap();
             sqlx::query(r#"

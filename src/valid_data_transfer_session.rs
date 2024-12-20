@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use file_store::{BytesMutStream, FileType};
 use futures::TryStreamExt;
 use helium_crypto::PublicKeyBinary;
@@ -43,7 +44,8 @@ impl DbTable for FileTypeValidDataTransferSession {
                     num_dcs bigint not null,
                     first_timestamp timestamptz not null,
                     last_timestamp timestamptz not null,
-                    rewardable_bytes bigint not null
+                    rewardable_bytes bigint not null,
+                    received_timestamp timestamptz not null
                 )
             "#,
         )
@@ -56,11 +58,15 @@ impl DbTable for FileTypeValidDataTransferSession {
 
 #[async_trait::async_trait]
 impl Insertable for Vec<ValidDataTransferSession> {
-    async fn insert(&self, db: &Pool<Postgres>) -> anyhow::Result<()> {
+    async fn insert(
+        &self,
+        db: &Pool<Postgres>,
+        file_timestamp: DateTime<Utc>,
+    ) -> anyhow::Result<()> {
         const NUM_IN_BATCH: usize = (u16::MAX / 8) as usize;
 
         for chunk in self.chunks(NUM_IN_BATCH) {
-            QueryBuilder::new("INSERT INTO valid_data_transfer_sessions(pub_key, payer, upload_bytes, download_bytes, num_dcs, first_timestamp, last_timestamp, rewardable_bytes)")
+            QueryBuilder::new("INSERT INTO valid_data_transfer_sessions(pub_key, payer, upload_bytes, download_bytes, num_dcs, first_timestamp, last_timestamp, rewardable_bytes, received_timestamp)")
             .push_values(chunk, |mut b, report| {
                 b.push_bind(PublicKeyBinary::from(report.pub_key.clone()).to_string())
                     .push_bind(PublicKeyBinary::from(report.payer.clone()).to_string())
@@ -69,7 +75,8 @@ impl Insertable for Vec<ValidDataTransferSession> {
                     .push_bind(report.num_dcs as i64)
                     .push_bind(to_datetime_ms(report.first_timestamp))
                     .push_bind(to_datetime_ms(report.last_timestamp))
-                    .push_bind(report.rewardable_bytes as i64);
+                    .push_bind(report.rewardable_bytes as i64)
+                    .push_bind(file_timestamp);
             })
             .build()
             .execute(db)

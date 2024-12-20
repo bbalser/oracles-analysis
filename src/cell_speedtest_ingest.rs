@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use file_store::{
     speedtest::CellSpeedtestIngestReport, traits::MsgDecode, BytesMutStream, FileType,
 };
@@ -55,7 +56,11 @@ impl DbTable for FileTypeCellSpeedtestIngestReport {
 
 #[async_trait::async_trait]
 impl Insertable for Vec<CellSpeedtestIngestReport> {
-    async fn insert(&self, db: &Pool<Postgres>) -> anyhow::Result<()> {
+    async fn insert(
+        &self,
+        db: &Pool<Postgres>,
+        _file_timestamp: DateTime<Utc>,
+    ) -> anyhow::Result<()> {
         for test in self {
             sqlx::query(
                 r#"
