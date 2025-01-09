@@ -10,10 +10,12 @@ use iot_reward_share::FileTypeIotRewardShare;
 use mobile_reward_share::FileTypeMobileRewardShare;
 use oracle_boosting::FileTypeOracleBoostingReport;
 use radio_thresholds::{FileTypeInvalidatedRadioThreshold, FileTypeRadioThreshold};
+use radio_usage_stats_ingest_report::FileTypeRadioUsageStatsIngestReport;
 use seniority_update::FileTypeSeniorityUpdate;
 use sqlx::{Pool, Postgres};
 use valid_data_transfer_session::FileTypeValidDataTransferSession;
 use validated_heartbeat::FileTypeValidatedHeartbeat;
+use verified_data_transfer_ingest::FileTypeVerifiedDataTransferIngest;
 use wifi_heartbeat_ingest_report::FileTypeWifiHeartbeatIngestReport;
 
 mod boosted_hex_update;
@@ -26,9 +28,11 @@ mod iot_reward_share;
 mod mobile_reward_share;
 mod oracle_boosting;
 mod radio_thresholds;
+mod radio_usage_stats_ingest_report;
 mod seniority_update;
 mod valid_data_transfer_session;
 mod validated_heartbeat;
+mod verified_data_transfer_ingest;
 mod wifi_heartbeat_ingest_report;
 
 #[derive(Debug, Clone, ValueEnum)]
@@ -42,10 +46,12 @@ pub enum SupportedFileTypes {
     MobileRewardShare,
     OracleBoostingReport,
     RadioThreshold,
+    RadioUsageStatsIngestReport,
     InvalidatedRadioThreshold,
     SeniorityUpdate,
     ValidatedHeartbeat,
     ValidDataTransferSession,
+    VerifiedDataTransferIngest,
     WifiHeartbeatIngestReport,
 }
 
@@ -73,11 +79,17 @@ impl SupportedFileTypes {
             SupportedFileTypes::MobileRewardShare => Box::new(FileTypeMobileRewardShare {}),
             SupportedFileTypes::OracleBoostingReport => Box::new(FileTypeOracleBoostingReport {}),
             SupportedFileTypes::RadioThreshold => Box::new(FileTypeRadioThreshold {}),
+            SupportedFileTypes::RadioUsageStatsIngestReport => {
+                Box::new(FileTypeRadioUsageStatsIngestReport)
+            }
             SupportedFileTypes::SeniorityUpdate => Box::new(FileTypeSeniorityUpdate),
             SupportedFileTypes::ValidDataTransferSession => {
                 Box::new(FileTypeValidDataTransferSession)
             }
             SupportedFileTypes::ValidatedHeartbeat => Box::new(FileTypeValidatedHeartbeat {}),
+            SupportedFileTypes::VerifiedDataTransferIngest => {
+                Box::new(FileTypeVerifiedDataTransferIngest)
+            }
             SupportedFileTypes::WifiHeartbeatIngestReport => {
                 Box::new(FileTypeWifiHeartbeatIngestReport {})
             }

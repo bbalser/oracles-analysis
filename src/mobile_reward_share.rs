@@ -182,6 +182,7 @@ impl DbTable for FileTypeMobileRewardShare {
                 CREATE TABLE IF NOT EXISTS mobile_gateway_rewards (
                 	hotspot_key text NOT NULL,
                 	amount int8 NOT NULL,
+                	rewardable_bytes bigint not null,
                 	start_period timestamptz NOT NULL,
                 	end_period timestamptz NOT NULL,
                 	price int8 NOT NULL,
@@ -292,12 +293,13 @@ impl Insertable for Vec<MobileRewardShare> {
             }
             Some(mobile_reward_share::Reward::GatewayReward(gateway)) => sqlx::query(
                     r#"
-                        INSERT INTO mobile_gateway_rewards(hotspot_key, amount, start_period, end_period, price, file_timestamp)
-                        VALUES($1, $2, $3, $4, $5, $6)
+                        INSERT INTO mobile_gateway_rewards(hotspot_key, amount, rewardable_bytes, start_period, end_period, price, file_timestamp)
+                        VALUES($1, $2, $3, $4, $5, $6, $7)
                     "#,
                 )
                 .bind(PublicKey::try_from(gateway.hotspot_key)?.to_string())
                 .bind(gateway.dc_transfer_reward as i64)
+                .bind(gateway.rewardable_bytes as i64)
                 .bind(to_datetime(share.start_period))
                 .bind(to_datetime(share.end_period))
                 .bind(gateway.price as i64)

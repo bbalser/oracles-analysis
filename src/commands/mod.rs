@@ -56,6 +56,10 @@ impl S3Args {
             self.bucket.clone(),
             self.endpoint.clone(),
             Some(self.region.clone()),
+            None,
+            None,
+            None,
+            None,
         )
         .await
         .map_err(anyhow::Error::from)
