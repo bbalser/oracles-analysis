@@ -70,7 +70,7 @@ impl Insertable for Vec<ValidatedHeartbeat> {
     ) -> anyhow::Result<()> {
         const NUM_IN_BATCH: usize = (u16::MAX / 11) as usize;
 
-        let pubkey = PublicKeyBinary::from_str("1trSusex4JifCNu9Sg7m4KzNMN9E6z2J6UShifBaxZcCTUwYsKfczsnhHFn12RXJeEpF4AKhgYn9ksvFHAKVMt8k7tD2hLfNUEefg6nd2KJGoBdXhnosHVXvtagzCWqJxrzZEa89P3YZq18FxQxBeES5P6dphZ2nXd3K2CYRJ5FobijkfY2HHMyVhH51xMTXV8cuUGAXHv5h8SbKY1qpxVMrppXuKDFhXiH1P3DVVKnhw4JLWQDFr1oVNoxENpV7iYDEe77AYmUq2qUkrRD2qjmBKSny25hW5mfxRsg7D1jGZNKfLY1aoVomqnPa51zaXa5T2vtQRidQAXAvd1wvvy1jza13gAAAJrKcGYuFdbpTkM")?;
+        let pubkey = PublicKeyBinary::from_str("1trSusey7ycXX5i5sB2xLPEsdecG5quC6n18aKkG8V73s62CkArwF2Wqgr7WpbzSsnouyJJr5wSFw13zjos7Kq56ZgujDtkieMAxqLkRBBDGbFYyXjbEVKdquuvBdKwWZ5PaSZJyhYgrWSpPAg1gRa8x3mX5s425k4d2RDb7xf3n7sbuLpDfAwJJtuCUFeG2NHBE7Na52u4YsA6EvZtCq3jZXK1MfWLRFm9c4cXD1TwvfDVg1z2MzgWHuqG2MdEp1TWfU3Lgs6DTxKoUzYaBWiEX4e1onjYA4N4ERBwn7rGZEdrESC483T6KpALAdUpfYEh7XTUPwk6xmcNY2MzuW6yeRzxD4AN34rDEvYTFCwhpjs")?;
 
         let hbs: Vec<&ValidatedHeartbeat> = self.iter().filter(|hb| hb.pub_key == pubkey).collect();
 

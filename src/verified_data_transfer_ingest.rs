@@ -47,7 +47,8 @@ impl DbTable for FileTypeVerifiedDataTransferIngest {
                     download_bytes bigint not null,
                     rewardable_bytes bigint not null,
                     reward_cancelled bool not null,
-                    event_id text not null
+                    event_id text not null,
+                    rat text
                 )
             "#,
         )
@@ -65,10 +66,10 @@ impl Insertable for Vec<VerifiedDataTransferIngestReportV1> {
         db: &Pool<Postgres>,
         _file_timestamp: DateTime<Utc>,
     ) -> anyhow::Result<()> {
-        const NUM_IN_BATCH: usize = (u16::MAX / 11) as usize;
+        const NUM_IN_BATCH: usize = (u16::MAX / 12) as usize;
 
         for chunk in self.chunks(NUM_IN_BATCH) {
-            QueryBuilder::new("INSERT INTO verified_data_transfer_ingest(status, verified_timestamp, pub_key, received_timestamp, timestamp, payer, upload_bytes, download_bytes, rewardable_bytes, reward_cancelled, event_id)")
+            QueryBuilder::new("INSERT INTO verified_data_transfer_ingest(status, verified_timestamp, pub_key, received_timestamp, timestamp, payer, upload_bytes, download_bytes, rewardable_bytes, reward_cancelled, event_id, rat)")
             .push_values(chunk, |mut b, report| {
 
                 let req = report.clone().report.unwrap().report.unwrap();
@@ -84,7 +85,8 @@ impl Insertable for Vec<VerifiedDataTransferIngestReportV1> {
                     .push_bind(usage.download_bytes as i64)
                     .push_bind(req.rewardable_bytes as i64)
                     .push_bind(req.reward_cancelled)
-                    .push_bind(usage.event_id);
+                    .push_bind(usage.event_id.clone())
+                    .push_bind(usage.radio_access_technology().as_str_name());
             })
             .build()
             .execute(db)

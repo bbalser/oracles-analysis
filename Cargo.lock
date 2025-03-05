@@ -683,7 +683,7 @@ checksum = "35636a1494ede3b646cc98f74f8e62c773a38a659ebc777a2cf26b9b74171df9"
 [[package]]
 name = "beacon"
 version = "0.1.0"
-source = "git+https://github.com/helium/proto?branch=master#4085e00c6f4d82c3da798ae1bc97324bc9cada2e"
+source = "git+https://github.com/helium/proto?branch=master#1af76ea8784be68d118a262976e6b030ca01f1ef"
 dependencies = [
  "base64 0.21.5",
  "byteorder",
@@ -1414,7 +1414,7 @@ dependencies = [
 [[package]]
 name = "file-store"
 version = "0.1.0"
-source = "git+https://github.com/helium/oracles.git?branch=main#cd3f79a399767631e1764316b099921a824098b7"
+source = "git+https://github.com/helium/oracles.git?branch=main#0304f2512ef130309ab0b422bcf0129825f3039c"
 dependencies = [
  "anyhow",
  "async-compression",
@@ -1447,8 +1447,8 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.8",
- "strum 0.26.3",
- "strum_macros 0.26.4",
+ "strum 0.25.0",
+ "strum_macros 0.25.3",
  "task-manager",
  "thiserror",
  "tokio",
@@ -1835,7 +1835,7 @@ dependencies = [
 [[package]]
 name = "helium-proto"
 version = "0.1.0"
-source = "git+https://github.com/helium/proto?branch=master#4085e00c6f4d82c3da798ae1bc97324bc9cada2e"
+source = "git+https://github.com/helium/proto?branch=master#1af76ea8784be68d118a262976e6b030ca01f1ef"
 dependencies = [
  "bytes",
  "prost",
@@ -2650,7 +2650,7 @@ checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
 [[package]]
 name = "poc-metrics"
 version = "0.1.0"
-source = "git+https://github.com/helium/oracles.git?branch=main#cd3f79a399767631e1764316b099921a824098b7"
+source = "git+https://github.com/helium/oracles.git?branch=main#0304f2512ef130309ab0b422bcf0129825f3039c"
 dependencies = [
  "futures",
  "metrics 0.24.1",
@@ -3609,6 +3609,9 @@ name = "strum"
 version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "290d54ea6f91c969195bdbcd7442c8c2a2ba87da8bf60a7ee86a235d4bc1e125"
+dependencies = [
+ "strum_macros 0.25.3",
+]
 
 [[package]]
 name = "strum"
@@ -3712,7 +3715,7 @@ checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
 [[package]]
 name = "task-manager"
 version = "0.1.0"
-source = "git+https://github.com/helium/oracles.git?branch=main#cd3f79a399767631e1764316b099921a824098b7"
+source = "git+https://github.com/helium/oracles.git?branch=main#0304f2512ef130309ab0b422bcf0129825f3039c"
 dependencies = [
  "anyhow",
  "futures",

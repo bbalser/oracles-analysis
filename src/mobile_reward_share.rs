@@ -3,9 +3,12 @@ use std::str::FromStr;
 use chrono::{DateTime, Utc};
 use file_store::{BytesMutStream, FileType};
 use futures::TryStreamExt;
-use helium_crypto::{PublicKey, PublicKeyBinary};
+use helium_crypto::PublicKeyBinary;
 use helium_proto::{
-    services::poc_mobile::{self as proto, mobile_reward_share, MobileRewardShare},
+    services::poc_mobile::{
+        self as proto, mobile_reward_share, GatewayReward, MobileRewardShare, RadioReward,
+        SubscriberReward,
+    },
     Message,
 };
 use rust_decimal::Decimal;
@@ -83,8 +86,7 @@ impl DbTable for FileTypeMobileRewardShare {
                 	end_period timestamptz NULL,
                 	location_trust_score_multiplier int4 NOT NULL,
                 	speedtest_multiplier int4 NOT NULL,
-                	transfer_amount int8 NULL,
-                	boosted_hexes boosted_hex[] NOT NULL
+                	transfer_amount int8 NULL
                 )
             "#,
         )
@@ -259,112 +261,90 @@ impl Insertable for Vec<MobileRewardShare> {
         pool: &Pool<Postgres>,
         file_timestamp: DateTime<Utc>,
     ) -> anyhow::Result<()> {
+        let mut bulk_radio_reward = BulkRadioReward::default();
+        let mut bulk_gateway_reward = BulkGatewayReward::default();
+        let mut bulk_subscriber_reward = BulkSubscriberReward::default();
+
         for share in self {
             match share.reward.clone() {
-            Some(mobile_reward_share::Reward::RadioReward(radio)) => {
-                    let boosted_hexes: Vec<BoostedHex> = radio.boosted_hexes.into_iter()
-                        .map(|h| BoostedHex {
-                            location: h.location as i64,
-                            multiplier: h.multiplier as i32,
-                        }).collect();
-
-                    sqlx::query(
-                        r#"
-                            INSERT INTO mobile_radio_rewards(hotspot_key, cbsd_id, coverage_points, amount, start_period, end_period, transfer_amount, boosted_hexes, location_trust_score_multiplier, speedtest_multiplier)
-                            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-                        "#,
+                Some(mobile_reward_share::Reward::RadioReward(radio)) => {
+                    bulk_radio_reward.add(
+                        to_datetime(share.start_period),
+                        to_datetime(share.end_period),
+                        radio,
+                    );
+                }
+                Some(mobile_reward_share::Reward::RadioRewardV2(reward)) => {
+                    insert_radio_reward_v2(
+                        pool,
+                        reward,
+                        to_datetime(share.start_period),
+                        to_datetime(share.end_period),
                     )
-                    .bind(PublicKey::try_from(radio.hotspot_key)?.to_string())
-                    .bind(radio.cbsd_id)
-                    .bind(radio.coverage_points as i64)
-                    .bind(radio.poc_reward as i64)
+                    .await?
+                }
+                Some(mobile_reward_share::Reward::GatewayReward(gateway)) => {
+                    bulk_gateway_reward.add(
+                        to_datetime(share.start_period),
+                        to_datetime(share.end_period),
+                        file_timestamp,
+                        gateway,
+                    );
+                }
+                Some(mobile_reward_share::Reward::SubscriberReward(sub)) => {
+                    bulk_subscriber_reward.add(
+                        to_datetime(share.start_period),
+                        to_datetime(share.end_period),
+                        sub,
+                    );
+                }
+                Some(mobile_reward_share::Reward::ServiceProviderReward(service)) => sqlx::query(
+                    r#"
+                        INSERT INTO mobile_service_provider_rewards(service_provider, amount, start_period, end_period) VALUES($1,$2,$3,$4)
+                    "#
+                    )
+                    .bind(service.service_provider_id().as_str_name())
+                    .bind(service.amount as i64)
                     .bind(to_datetime(share.start_period))
                     .bind(to_datetime(share.end_period))
-                    .bind(radio.dc_transfer_reward as i64)
-                    .bind(boosted_hexes)
-                    .bind(radio.location_trust_score_multiplier as i32)
-                    .bind(radio.speedtest_multiplier as i32)
                     .execute(pool)
                     .await
-                    .map(|_| ())?
-            }
-            Some(mobile_reward_share::Reward::RadioRewardV2(reward)) => {
-                insert_radio_reward_v2(pool, reward, to_datetime(share.start_period), to_datetime(share.end_period)).await?
-            }
-            Some(mobile_reward_share::Reward::GatewayReward(gateway)) => sqlx::query(
+                    .map(|_| ())?,
+                Some(mobile_reward_share::Reward::PromotionReward(promotion)) => sqlx::
+                    query(
+                      r#"
+                        INSERT INTO mobile_promotion_rewards(start_period, end_period, entity, service_provider_amount, matched_amount)
+                        VALUES($1, $2, $3, $4, $5)
+                      "#
+                      )
+                    .bind(to_datetime(share.start_period))
+                    .bind(to_datetime(share.end_period))
+                    .bind(&promotion.entity)
+                    .bind(promotion.service_provider_amount as i64)
+                    .bind(promotion.matched_amount as i64)
+                    .execute(pool)
+                    .await
+                    .map(|_| ())?,
+                Some(mobile_reward_share::Reward::UnallocatedReward(unallocated)) => {
+                    sqlx::query(
                     r#"
-                        INSERT INTO mobile_gateway_rewards(hotspot_key, amount, rewardable_bytes, start_period, end_period, price, file_timestamp)
-                        VALUES($1, $2, $3, $4, $5, $6, $7)
-                    "#,
-                )
-                .bind(PublicKey::try_from(gateway.hotspot_key)?.to_string())
-                .bind(gateway.dc_transfer_reward as i64)
-                .bind(gateway.rewardable_bytes as i64)
-                .bind(to_datetime(share.start_period))
-                .bind(to_datetime(share.end_period))
-                .bind(gateway.price as i64)
-                .bind(file_timestamp)
-                .execute(pool)
-                .await
-                .map(|_| ())?,
-            Some(mobile_reward_share::Reward::SubscriberReward(sub)) => sqlx::query(
-                    r#"
-                        INSERT INTO mobile_subscriber_rewards(subscriber_id, disco_amount, verification_amount, start_period, end_period)
-                        VALUES($1,$2,$3,$4,$5)
+                        INSERT INTO mobile_unallocated_rewards(reward_type, amount, start_period, end_period) VALUES($1,$2,$3,$4)
                     "#
-                )
-                .bind(sub.subscriber_id)
-                .bind(sub.discovery_location_amount as i64)
-                .bind(sub.verification_mapping_amount as i64)
-                .bind(to_datetime(share.start_period))
-                .bind(to_datetime(share.end_period))
-                .execute(pool)
-                .await
-                .map(|_| ())?,
-            Some(mobile_reward_share::Reward::ServiceProviderReward(service)) => sqlx::query(
-                r#"
-                    INSERT INTO mobile_service_provider_rewards(service_provider, amount, start_period, end_period) VALUES($1,$2,$3,$4)
-                "#
-                )
-                .bind(service.service_provider_id().as_str_name())
-                .bind(service.amount as i64)
-                .bind(to_datetime(share.start_period))
-                .bind(to_datetime(share.end_period))
-                .execute(pool)
-                .await
-                .map(|_| ())?,
-            Some(mobile_reward_share::Reward::PromotionReward(promotion)) => sqlx::
-                query(
-                  r#"
-                    INSERT INTO mobile_promotion_rewards(start_period, end_period, entity, service_provider_amount, matched_amount)
-                    VALUES($1, $2, $3, $4, $5)
-                  "#
-                  )
-                .bind(to_datetime(share.start_period))
-                .bind(to_datetime(share.end_period))
-                .bind(&promotion.entity)
-                .bind(promotion.service_provider_amount as i64)
-                .bind(promotion.matched_amount as i64)
-                .execute(pool)
-                .await
-                .map(|_| ())?,
-            Some(mobile_reward_share::Reward::UnallocatedReward(unallocated)) => {
-                dbg!(&unallocated);
-                sqlx::query(
-                r#"
-                    INSERT INTO mobile_unallocated_rewards(reward_type, amount, start_period, end_period) VALUES($1,$2,$3,$4)
-                "#
-                )
-                .bind(unallocated.reward_type().as_str_name())
-                .bind(unallocated.amount as i64)
-                .bind(to_datetime(share.start_period))
-                .bind(to_datetime(share.end_period))
-                .execute(pool)
-                .await
-                .map(|_| ())?},
-            _ => ()
-        };
+                    )
+                    .bind(unallocated.reward_type().as_str_name())
+                    .bind(unallocated.amount as i64)
+                    .bind(to_datetime(share.start_period))
+                    .bind(to_datetime(share.end_period))
+                    .execute(pool)
+                    .await
+                    .map(|_| ())?},
+                _ => (),
+            };
         }
+
+        bulk_radio_reward.insert(pool).await?;
+        bulk_gateway_reward.insert(pool).await?;
+        bulk_subscriber_reward.insert(pool).await?;
         Ok(())
     }
 }
@@ -487,4 +467,158 @@ async fn insert_radio_reward_v2(
     transaction.commit().await?;
 
     Ok(())
+}
+
+#[derive(Default)]
+struct BulkRadioReward {
+    hotspot_key: Vec<String>,
+    cbsd_id: Vec<String>,
+    coverage_points: Vec<i64>,
+    poc_reward: Vec<i64>,
+    start_period: Vec<DateTime<Utc>>,
+    end_period: Vec<DateTime<Utc>>,
+    dc_transfer_reward: Vec<i64>,
+    location_trust_score_multiplier: Vec<i32>,
+    speedtest_multiplier: Vec<i32>,
+}
+
+impl BulkRadioReward {
+    #[allow(deprecated)]
+    fn add(&mut self, start_period: DateTime<Utc>, end_period: DateTime<Utc>, radio: RadioReward) {
+        self.start_period.push(start_period);
+        self.end_period.push(end_period);
+        self.hotspot_key.push(
+            PublicKeyBinary::try_from(radio.hotspot_key)
+                .unwrap()
+                .to_string(),
+        );
+        self.cbsd_id.push(radio.cbsd_id);
+        self.coverage_points.push(radio.coverage_points as i64);
+        self.poc_reward.push(radio.poc_reward as i64);
+        self.dc_transfer_reward
+            .push(radio.dc_transfer_reward as i64);
+        self.location_trust_score_multiplier
+            .push(radio.location_trust_score_multiplier as i32);
+        self.speedtest_multiplier
+            .push(radio.speedtest_multiplier as i32);
+    }
+
+    async fn insert(self, db: &Pool<Postgres>) -> anyhow::Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO mobile_radio_rewards(hotspot_key, cbsd_id, coverage_points, amount, start_period, end_period, transfer_amount, location_trust_score_multiplier, speedtest_multiplier)
+            SELECT * FROM UNNEST($1,$2,$3,$4,$5,$6,$7,$8,$9)
+            "#,
+        )
+        .bind(self.hotspot_key)
+        .bind(self.cbsd_id)
+        .bind(self.coverage_points)
+        .bind(self.poc_reward)
+        .bind(self.start_period)
+        .bind(self.end_period)
+        .bind(self.dc_transfer_reward)
+        .bind(self.location_trust_score_multiplier)
+        .bind(self.speedtest_multiplier)
+        .execute(db)
+        .await?;
+
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+struct BulkGatewayReward {
+    hotspot_key: Vec<String>,
+    amount: Vec<i64>,
+    rewardable_bytes: Vec<i64>,
+    start_period: Vec<DateTime<Utc>>,
+    end_period: Vec<DateTime<Utc>>,
+    price: Vec<i64>,
+    file_timestamp: Vec<DateTime<Utc>>,
+}
+
+impl BulkGatewayReward {
+    fn add(
+        &mut self,
+        start_period: DateTime<Utc>,
+        end_period: DateTime<Utc>,
+        file_timestamp: DateTime<Utc>,
+        gateway: GatewayReward,
+    ) {
+        self.start_period.push(start_period);
+        self.end_period.push(end_period);
+        self.file_timestamp.push(file_timestamp);
+        self.hotspot_key.push(
+            PublicKeyBinary::try_from(gateway.hotspot_key)
+                .unwrap()
+                .to_string(),
+        );
+        self.amount.push(gateway.dc_transfer_reward as i64);
+        self.rewardable_bytes.push(gateway.rewardable_bytes as i64);
+        self.price.push(gateway.price as i64);
+    }
+
+    async fn insert(self, db: &Pool<Postgres>) -> anyhow::Result<()> {
+        sqlx::query(
+            r#"
+                INSERT INTO mobile_gateway_rewards(hotspot_key, amount, rewardable_bytes, start_period, end_period, price, file_timestamp)
+                SELECT * FROM UNNEST($1, $2, $3, $4, $5, $6, $7)
+            "#,
+        )
+        .bind(self.hotspot_key)
+        .bind(self.amount)
+        .bind(self.rewardable_bytes)
+        .bind(self.start_period)
+        .bind(self.end_period)
+        .bind(self.price)
+        .bind(self.file_timestamp)
+        .execute(db)
+        .await?;
+
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+struct BulkSubscriberReward {
+    subscriber_id: Vec<Vec<u8>>,
+    disco_amount: Vec<i64>,
+    verification_amount: Vec<i64>,
+    start_period: Vec<DateTime<Utc>>,
+    end_period: Vec<DateTime<Utc>>,
+}
+
+impl BulkSubscriberReward {
+    fn add(
+        &mut self,
+        start_period: DateTime<Utc>,
+        end_period: DateTime<Utc>,
+        reward: SubscriberReward,
+    ) {
+        self.subscriber_id.push(reward.subscriber_id);
+        self.disco_amount
+            .push(reward.discovery_location_amount as i64);
+        self.verification_amount
+            .push(reward.verification_mapping_amount as i64);
+        self.start_period.push(start_period);
+        self.end_period.push(end_period);
+    }
+
+    async fn insert(self, db: &Pool<Postgres>) -> anyhow::Result<()> {
+        sqlx::query(
+            r#"
+                INSERT INTO mobile_subscriber_rewards(subscriber_id, disco_amount, verification_amount, start_period, end_period)
+                SELECT * FROM UNNEST($1, $2, $3, $4, $5)
+            "#
+        )
+        .bind(self.subscriber_id)
+        .bind(self.disco_amount)
+        .bind(self.verification_amount)
+        .bind(self.start_period)
+        .bind(self.end_period)
+        .execute(db)
+        .await?;
+
+        Ok(())
+    }
 }
