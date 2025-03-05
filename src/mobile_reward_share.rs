@@ -62,14 +62,14 @@ impl DbTable for FileTypeMobileRewardShare {
     async fn create_table(&self, db: &sqlx::Pool<sqlx::Postgres>) -> anyhow::Result<()> {
         sqlx::query(
             r#"
-            DO $$ BEGIN
-                CREATE TYPE boosted_hex AS (
-                    location bigint,
-                	multiplier int
-                );
-            EXCEPTION
-                WHEN duplicate_object THEN null;
-            END $$;
+                DO $$ BEGIN
+                    CREATE TYPE boosted_hex AS (
+                        location bigint,
+                    	multiplier int
+                    );
+                EXCEPTION
+                    WHEN duplicate_object THEN null;
+                END $$;
             "#,
         )
         .execute(db)
