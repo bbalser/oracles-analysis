@@ -5,6 +5,7 @@ use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
 pub mod animal_names;
 pub mod clean;
 pub mod import;
+pub mod reward_analyzer;
 
 #[derive(Debug, clap::Args)]
 pub struct DbArgs {

@@ -1,9 +1,7 @@
-use std::str::FromStr;
-
 use chrono::{DateTime, Utc};
 use file_store::{heartbeat::cli::ValidatedHeartbeat, traits::MsgDecode, BytesMutStream, FileType};
 use futures::TryStreamExt;
-use helium_crypto::{PublicKey, PublicKeyBinary};
+use helium_crypto::PublicKey;
 use sqlx::{Pool, Postgres, QueryBuilder};
 use uuid::Uuid;
 
@@ -68,13 +66,9 @@ impl Insertable for Vec<ValidatedHeartbeat> {
         pool: &Pool<Postgres>,
         _file_timestamp: DateTime<Utc>,
     ) -> anyhow::Result<()> {
-        const NUM_IN_BATCH: usize = (u16::MAX / 11) as usize;
+        const NUM_IN_BATCH: usize = (u16::MAX / 12) as usize;
 
-        let pubkey = PublicKeyBinary::from_str("1trSusey7ycXX5i5sB2xLPEsdecG5quC6n18aKkG8V73s62CkArwF2Wqgr7WpbzSsnouyJJr5wSFw13zjos7Kq56ZgujDtkieMAxqLkRBBDGbFYyXjbEVKdquuvBdKwWZ5PaSZJyhYgrWSpPAg1gRa8x3mX5s425k4d2RDb7xf3n7sbuLpDfAwJJtuCUFeG2NHBE7Na52u4YsA6EvZtCq3jZXK1MfWLRFm9c4cXD1TwvfDVg1z2MzgWHuqG2MdEp1TWfU3Lgs6DTxKoUzYaBWiEX4e1onjYA4N4ERBwn7rGZEdrESC483T6KpALAdUpfYEh7XTUPwk6xmcNY2MzuW6yeRzxD4AN34rDEvYTFCwhpjs")?;
-
-        let hbs: Vec<&ValidatedHeartbeat> = self.iter().filter(|hb| hb.pub_key == pubkey).collect();
-
-        for chunk in hbs.chunks(NUM_IN_BATCH) {
+        for chunk in self.chunks(NUM_IN_BATCH) {
             let mut qb = QueryBuilder::new("INSERT INTO mobile_validated_heartbeats(hotspot_key, cbsd_id, reward_multiplier, cell_type, validity, location_validation_timestamp, distance_to_asserted, timestamp, location_trust_score_multiplier, lat, lon, coverage_object)");
 
             qb.push_values(chunk, |mut b, hb| {
@@ -91,8 +85,8 @@ impl Insertable for Vec<ValidatedHeartbeat> {
                     .push_bind(hb.lon)
                     .push_bind(
                         Uuid::from_slice(hb.coverage_object.as_slice())
-                            .expect("inavlid uuid")
-                            .to_string(),
+                            .map(|u| u.to_string())
+                            .unwrap_or("invalid".to_string()),
                     );
             })
             .build()

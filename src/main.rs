@@ -2,7 +2,9 @@ use chrono::{DateTime, Utc};
 use clap::Parser;
 
 use h3o::{CellIndex, LatLng};
-use oracle_persist::commands::{animal_names::AnimalNames, clean::Clean, import::Import};
+use oracle_persist::commands::{
+    animal_names::AnimalNames, clean::Clean, import::Import, reward_analyzer::RewardAnalyzer,
+};
 use rust_decimal::{prelude::ToPrimitive, Decimal};
 use sqlx::Row;
 
@@ -19,6 +21,7 @@ enum Cmd {
     AssertedDistance(AssertedDistance),
     ToHex(ToHex),
     AnimalNames(AnimalNames),
+    RewardAnalyzer(RewardAnalyzer),
 }
 
 #[derive(Debug, clap::Args)]
@@ -101,6 +104,7 @@ impl Cmd {
             Cmd::AssertedDistance(asserted_distance) => asserted_distance.run().await,
             Cmd::ToHex(to_hex) => to_hex.run().await,
             Cmd::AnimalNames(an) => an.run().await,
+            Cmd::RewardAnalyzer(ra) => ra.run().await,
         }
     }
 }
