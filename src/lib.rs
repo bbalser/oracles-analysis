@@ -12,6 +12,7 @@ use oracle_boosting::FileTypeOracleBoostingReport;
 use radio_thresholds::{FileTypeInvalidatedRadioThreshold, FileTypeRadioThreshold};
 use radio_usage_stats_ingest_report::FileTypeRadioUsageStatsIngestReport;
 use seniority_update::FileTypeSeniorityUpdate;
+use service_provider_bans::FileTypeServiceProviderBan;
 use sqlx::{Pool, Postgres};
 use valid_data_transfer_session::FileTypeValidDataTransferSession;
 use validated_heartbeat::FileTypeValidatedHeartbeat;
@@ -30,6 +31,7 @@ mod oracle_boosting;
 mod radio_thresholds;
 mod radio_usage_stats_ingest_report;
 mod seniority_update;
+mod service_provider_bans;
 mod valid_data_transfer_session;
 mod validated_heartbeat;
 mod verified_data_transfer_ingest;
@@ -49,6 +51,7 @@ pub enum SupportedFileTypes {
     RadioUsageStatsIngestReport,
     InvalidatedRadioThreshold,
     SeniorityUpdate,
+    ServiceProviderBans,
     ValidatedHeartbeat,
     ValidDataTransferSession,
     VerifiedDataTransferIngest,
@@ -83,6 +86,7 @@ impl SupportedFileTypes {
                 Box::new(FileTypeRadioUsageStatsIngestReport)
             }
             SupportedFileTypes::SeniorityUpdate => Box::new(FileTypeSeniorityUpdate),
+            SupportedFileTypes::ServiceProviderBans => Box::new(FileTypeServiceProviderBan),
             SupportedFileTypes::ValidDataTransferSession => {
                 Box::new(FileTypeValidDataTransferSession)
             }
