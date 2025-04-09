@@ -15,6 +15,7 @@ use seniority_update::FileTypeSeniorityUpdate;
 use service_provider_bans::FileTypeServiceProviderBan;
 use sqlx::{Pool, Postgres};
 use valid_data_transfer_session::FileTypeValidDataTransferSession;
+use validated_event_req_v1::FileTypeValidatedEventReq;
 use validated_heartbeat::FileTypeValidatedHeartbeat;
 use verified_data_transfer_ingest::FileTypeVerifiedDataTransferIngest;
 use wifi_heartbeat_ingest_report::FileTypeWifiHeartbeatIngestReport;
@@ -33,6 +34,7 @@ mod radio_usage_stats_ingest_report;
 mod seniority_update;
 mod service_provider_bans;
 mod valid_data_transfer_session;
+mod validated_event_req_v1;
 mod validated_heartbeat;
 mod verified_data_transfer_ingest;
 mod wifi_heartbeat_ingest_report;
@@ -54,6 +56,7 @@ pub enum SupportedFileTypes {
     ServiceProviderBans,
     ValidatedHeartbeat,
     ValidDataTransferSession,
+    ValidatedEventReq,
     VerifiedDataTransferIngest,
     WifiHeartbeatIngestReport,
 }
@@ -91,6 +94,7 @@ impl SupportedFileTypes {
                 Box::new(FileTypeValidDataTransferSession)
             }
             SupportedFileTypes::ValidatedHeartbeat => Box::new(FileTypeValidatedHeartbeat {}),
+            SupportedFileTypes::ValidatedEventReq => Box::new(FileTypeValidatedEventReq),
             SupportedFileTypes::VerifiedDataTransferIngest => {
                 Box::new(FileTypeVerifiedDataTransferIngest)
             }

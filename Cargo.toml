@@ -29,6 +29,7 @@ hex = "0"
 hextree = { git = "https://github.com/jaykickliter/HexTree", branch = "main", features = [
   "disktree",
 ] }
+mapper-proto = { git = "ssh://git@github.com/novalabsxyz/subscriber-location-service.git" }
 rust_decimal = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version="1", features = ["raw_value"] }

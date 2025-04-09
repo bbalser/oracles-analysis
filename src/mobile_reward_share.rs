@@ -6,19 +6,20 @@ use futures::TryStreamExt;
 use helium_crypto::PublicKeyBinary;
 use helium_proto::{
     services::poc_mobile::{
-        self as proto, mobile_reward_share, GatewayReward, MobileRewardShare, RadioReward,
-        SubscriberReward,
+        mobile_reward_share, GatewayReward, MobileRewardShare, RadioReward, SubscriberReward,
     },
     Message,
 };
+use radio_reward_v2::BulkRadioRewardV2;
 use rust_decimal::Decimal;
 use sqlx::{
     postgres::{PgHasArrayType, PgTypeInfo},
-    Pool, Postgres, QueryBuilder, Row,
+    Pool, Postgres,
 };
-use uuid::Uuid;
 
 use crate::{to_datetime, DbTable, Decode, Insertable, ToPrefix};
+
+mod radio_reward_v2;
 
 #[derive(Debug, Clone, sqlx::Type)]
 #[sqlx(type_name = "boosted_hex")]
@@ -264,6 +265,7 @@ impl Insertable for Vec<MobileRewardShare> {
         let mut bulk_radio_reward = BulkRadioReward::default();
         let mut bulk_gateway_reward = BulkGatewayReward::default();
         let mut bulk_subscriber_reward = BulkSubscriberReward::default();
+        let mut bulk_radio_reward_v2 = BulkRadioRewardV2::default();
 
         for share in self {
             match share.reward.clone() {
@@ -275,13 +277,11 @@ impl Insertable for Vec<MobileRewardShare> {
                     );
                 }
                 Some(mobile_reward_share::Reward::RadioRewardV2(reward)) => {
-                    insert_radio_reward_v2(
-                        pool,
+                    bulk_radio_reward_v2.add(
                         reward,
                         to_datetime(share.start_period),
-                        to_datetime(share.end_period),
-                    )
-                    .await?
+                        to_datetime(share.end_period)
+                    );
                 }
                 Some(mobile_reward_share::Reward::GatewayReward(gateway)) => {
                     bulk_gateway_reward.add(
@@ -343,6 +343,7 @@ impl Insertable for Vec<MobileRewardShare> {
         }
 
         bulk_radio_reward.insert(pool).await?;
+        bulk_radio_reward_v2.insert(pool).await?;
         bulk_gateway_reward.insert(pool).await?;
         bulk_subscriber_reward.insert(pool).await?;
         Ok(())
@@ -353,120 +354,6 @@ fn from_proto_decimal(opt: Option<&helium_proto::Decimal>) -> Decimal {
     opt.ok_or_else(|| anyhow::anyhow!("decimal not present"))
         .and_then(|d| Decimal::from_str(&d.value).map_err(anyhow::Error::from))
         .unwrap_or_default()
-}
-
-async fn insert_radio_reward_v2(
-    pool: &Pool<Postgres>,
-    reward: proto::RadioRewardV2,
-    start_period: DateTime<Utc>,
-    end_period: DateTime<Utc>,
-) -> anyhow::Result<()> {
-    let mut transaction = pool.begin().await?;
-
-    let row = sqlx::query(r#"
-        INSERT INTO mobile_radio_rewards_v2(start_period, end_period, hotspot_key, cbsd_id, base_coverage_points_sum, boosted_coverage_points_sum, base_reward_shares, boosted_reward_shares, base_poc_reward, boosted_poc_reward, seniority_ts, coverage_object, location_trust_score_multiplier, speedtest_multiplier, sp_boosted_hex_status, oracle_boosted_hex_status)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
-        RETURNING id
-        "#)
-        .bind(start_period)
-        .bind(end_period)
-        .bind(PublicKeyBinary::from(reward.hotspot_key.as_slice()).to_string())
-        .bind(&reward.cbsd_id)
-        .bind(from_proto_decimal(reward.base_coverage_points_sum.as_ref()))
-        .bind(from_proto_decimal(reward.boosted_coverage_points_sum.as_ref()))
-        .bind(from_proto_decimal(reward.base_reward_shares.as_ref()))
-        .bind(from_proto_decimal(reward.boosted_reward_shares.as_ref()))
-        .bind(reward.base_poc_reward as i64)
-        .bind(reward.boosted_poc_reward as i64)
-        .bind(to_datetime(reward.seniority_timestamp))
-        .bind(Uuid::from_slice(reward.coverage_object.as_slice())?)
-        .bind(from_proto_decimal(reward.location_trust_score_multiplier.as_ref()))
-        .bind(from_proto_decimal(reward.speedtest_multiplier.as_ref()))
-        .bind(reward.sp_boosted_hex_status().as_str_name())
-        .bind(reward.oracle_boosted_hex_status().as_str_name())
-        .fetch_one(&mut transaction)
-        .await?;
-
-    let id = row.get::<i64, &str>("id");
-
-    let num_in_batch: usize = (u16::MAX / 3) as usize;
-    for chunk in reward.location_trust_scores.chunks(num_in_batch) {
-        QueryBuilder::new(
-            r#"
-            INSERT INTO location_trust_scores(id, meters_to_asserted, trust_score)
-            "#,
-        )
-        .push_values(chunk, |mut b, lt| {
-            b.push_bind(id)
-                .push_bind(lt.meters_to_asserted as i64)
-                .push_bind(from_proto_decimal(lt.trust_score.as_ref()));
-        })
-        .build()
-        .execute(&mut transaction)
-        .await?;
-    }
-
-    let num_in_batch: usize = (u16::MAX / 5) as usize;
-    for chunk in reward.speedtests.chunks(num_in_batch) {
-        QueryBuilder::new(
-            r#"
-            INSERT INTO speedtests(id, upload, download, latency, timestamp)
-            "#,
-        )
-        .push_values(chunk, |mut b, st| {
-            b.push_bind(id)
-                .push_bind(st.upload_speed_bps as i64)
-                .push_bind(st.download_speed_bps as i64)
-                .push_bind(st.latency_ms as i32)
-                .push_bind(to_datetime(st.timestamp));
-        })
-        .build()
-        .execute(&mut transaction)
-        .await?;
-    }
-
-    if let Some(avg) = reward.speedtest_average {
-        sqlx::query(
-            r#"
-                INSERT INTO speedtest_average(id, upload, download, latency, timestamp)
-                VALUES($1,$2,$3,$4,$5)
-            "#,
-        )
-        .bind(id)
-        .bind(avg.upload_speed_bps as i64)
-        .bind(avg.download_speed_bps as i64)
-        .bind(avg.latency_ms as i32)
-        .bind(to_datetime(avg.timestamp))
-        .execute(&mut transaction)
-        .await?;
-    }
-
-    let num_in_batch: usize = (u16::MAX / 11) as usize;
-    for chunk in reward.covered_hexes.chunks(num_in_batch) {
-        QueryBuilder::new(r#"
-            INSERT INTO covered_hexes(id, location, base_coverage_points, boosted_coverage_points, urbanized, footfall, landtype, assignment_multiplier, rank, rank_multiplier, boosted_multiplier)
-            "#)
-            .push_values(chunk, |mut b, h| {
-                b.push_bind(id)
-                .push_bind(h.location as i64)
-                .push_bind(from_proto_decimal(h.base_coverage_points.as_ref()))
-                .push_bind(from_proto_decimal(h.boosted_coverage_points.as_ref()))
-                .push_bind(h.urbanized().as_str_name())
-                .push_bind(h.footfall().as_str_name())
-                .push_bind(h.landtype().as_str_name())
-                .push_bind(from_proto_decimal(h.assignment_multiplier.as_ref()))
-                .push_bind(h.rank as i32)
-                .push_bind(from_proto_decimal(h.rank_multiplier.as_ref()))
-                .push_bind(h.boosted_multiplier as i32);
-            })
-            .build()
-            .execute(&mut transaction)
-            .await?;
-    }
-
-    transaction.commit().await?;
-
-    Ok(())
 }
 
 #[derive(Default)]

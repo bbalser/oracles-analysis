@@ -1471,6 +1471,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.8",
+ "sqlx",
  "strum 0.25.0",
  "strum_macros 0.25.3",
  "task-manager",
@@ -2269,6 +2270,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "mapper-proto"
+version = "0.1.0"
+source = "git+ssh://git@github.com/novalabsxyz/subscriber-location-service.git#009cba20c604e0f57b0a7a0c4fbf83c7316236b1"
+dependencies = [
+ "base64 0.21.5",
+ "bs58",
+ "bytes",
+ "chrono",
+ "file-store",
+ "helium-crypto",
+ "prost",
+ "prost-build",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror",
+ "ulid",
+]
+
+[[package]]
 name = "matchers"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2595,6 +2616,7 @@ dependencies = [
  "hex",
  "hex-assignments",
  "hextree",
+ "mapper-proto",
  "rust_decimal",
  "serde",
  "serde_json",
@@ -4159,6 +4181,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e36a83ea2b3c704935a01b4642946aadd445cea40b10935e3f8bd8052b8193d6"
 
 [[package]]
+name = "ulid"
+version = "1.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f294bff79170ed1c5633812aff1e565c35d993a36e757f9bc0accf5eec4e6045"
+dependencies = [
+ "rand",
+ "serde",
+ "web-time",
+]
+
+[[package]]
 name = "unicode-bidi"
 version = "0.3.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4328,6 +4361,16 @@ name = "web-sys"
 version = "0.3.66"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "50c24a44ec86bb68fbecd1b3efed7e85ea5621b39b35ef2766b66cd984f8010f"
+dependencies = [
+ "js-sys",
+ "wasm-bindgen",
+]
+
+[[package]]
+name = "web-time"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
