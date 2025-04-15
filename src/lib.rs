@@ -11,6 +11,7 @@ use mobile_reward_share::FileTypeMobileRewardShare;
 use oracle_boosting::FileTypeOracleBoostingReport;
 use radio_thresholds::{FileTypeInvalidatedRadioThreshold, FileTypeRadioThreshold};
 use radio_usage_stats_ingest_report::FileTypeRadioUsageStatsIngestReport;
+use reward_manifest::FileTypeRewardManifest;
 use seniority_update::FileTypeSeniorityUpdate;
 use service_provider_bans::FileTypeServiceProviderBan;
 use sqlx::{Pool, Postgres};
@@ -31,6 +32,7 @@ mod mobile_reward_share;
 mod oracle_boosting;
 mod radio_thresholds;
 mod radio_usage_stats_ingest_report;
+mod reward_manifest;
 mod seniority_update;
 mod service_provider_bans;
 mod valid_data_transfer_session;
@@ -59,6 +61,7 @@ pub enum SupportedFileTypes {
     ValidatedEventReq,
     VerifiedDataTransferIngest,
     WifiHeartbeatIngestReport,
+    RewardManifest,
 }
 
 trait SupportedFileTypeTrait: Decode + ToPrefix + DbTable {}
@@ -88,6 +91,7 @@ impl SupportedFileTypes {
             SupportedFileTypes::RadioUsageStatsIngestReport => {
                 Box::new(FileTypeRadioUsageStatsIngestReport)
             }
+            SupportedFileTypes::RewardManifest => Box::new(FileTypeRewardManifest),
             SupportedFileTypes::SeniorityUpdate => Box::new(FileTypeSeniorityUpdate),
             SupportedFileTypes::ServiceProviderBans => Box::new(FileTypeServiceProviderBan),
             SupportedFileTypes::ValidDataTransferSession => {
