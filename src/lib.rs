@@ -16,7 +16,7 @@ use seniority_update::FileTypeSeniorityUpdate;
 use service_provider_bans::FileTypeServiceProviderBan;
 use sqlx::{Pool, Postgres};
 use valid_data_transfer_session::FileTypeValidDataTransferSession;
-use validated_event_req_v1::FileTypeValidatedEventReq;
+// use validated_event_req_v1::FileTypeValidatedEventReq;
 use validated_heartbeat::FileTypeValidatedHeartbeat;
 use verified_data_transfer_ingest::FileTypeVerifiedDataTransferIngest;
 use wifi_heartbeat_ingest_report::FileTypeWifiHeartbeatIngestReport;
@@ -36,7 +36,7 @@ mod reward_manifest;
 mod seniority_update;
 mod service_provider_bans;
 mod valid_data_transfer_session;
-mod validated_event_req_v1;
+// mod validated_event_req_v1;
 mod validated_heartbeat;
 mod verified_data_transfer_ingest;
 mod wifi_heartbeat_ingest_report;
@@ -58,7 +58,7 @@ pub enum SupportedFileTypes {
     ServiceProviderBans,
     ValidatedHeartbeat,
     ValidDataTransferSession,
-    ValidatedEventReq,
+    // ValidatedEventReq,
     VerifiedDataTransferIngest,
     WifiHeartbeatIngestReport,
     RewardManifest,
@@ -98,7 +98,7 @@ impl SupportedFileTypes {
                 Box::new(FileTypeValidDataTransferSession)
             }
             SupportedFileTypes::ValidatedHeartbeat => Box::new(FileTypeValidatedHeartbeat {}),
-            SupportedFileTypes::ValidatedEventReq => Box::new(FileTypeValidatedEventReq),
+            // SupportedFileTypes::ValidatedEventReq => Box::new(FileTypeValidatedEventReq),
             SupportedFileTypes::VerifiedDataTransferIngest => {
                 Box::new(FileTypeVerifiedDataTransferIngest)
             }
@@ -151,6 +151,18 @@ pub fn to_datetime(timestamp: u64) -> DateTime<Utc> {
 
 pub fn to_datetime_ms(timestamp: u64) -> DateTime<Utc> {
     Utc.timestamp_millis_opt(timestamp as i64).single().unwrap()
+}
+
+pub fn determine_timestamp(timestamp: u64) -> DateTime<Utc> {
+    const MILLISECOND_THRESHOLD: u64 = 1_000_000_000_000;
+
+    if timestamp > MILLISECOND_THRESHOLD {
+        // Assume milliseconds format
+        to_datetime_ms(timestamp)
+    } else {
+        // Assume seconds format
+        to_datetime(timestamp)
+    }
 }
 
 pub fn to_optional_datetime(timestamp: u64) -> Option<DateTime<Utc>> {

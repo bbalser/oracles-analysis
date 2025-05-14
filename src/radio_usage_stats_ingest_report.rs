@@ -5,7 +5,7 @@ use helium_crypto::PublicKeyBinary;
 use helium_proto::{services::poc_mobile::RadioUsageStatsIngestReportV1, Message};
 use sqlx::{Pool, Postgres, QueryBuilder};
 
-use crate::{to_datetime, to_datetime_ms, DbTable, Decode, Insertable, ToPrefix};
+use crate::{determine_timestamp, DbTable, Decode, Insertable, ToPrefix};
 
 #[derive(Clone, Debug)]
 pub struct FileTypeRadioUsageStatsIngestReport;
@@ -73,7 +73,7 @@ impl Insertable for Vec<RadioUsageStatsIngestReportV1> {
 
                 let req = report.clone().report.unwrap();
 
-                b.push_bind(to_datetime_ms(report.received_timestamp))
+                b.push_bind(determine_timestamp(report.received_timestamp))
                     .push_bind(PublicKeyBinary::from(req.hotspot_pubkey.clone()).to_string())
                     .push_bind(req.cbsd_id)
                     .push_bind(req.service_provider_user_count as i64)
@@ -81,9 +81,9 @@ impl Insertable for Vec<RadioUsageStatsIngestReportV1> {
                     .push_bind(req.offload_user_count as i64)
                     .push_bind(req.service_provider_transfer_bytes as i64)
                     .push_bind(req.offload_transfer_bytes as i64)
-                    .push_bind(to_datetime(req.epoch_start_timestamp))
-                    .push_bind(to_datetime(req.epoch_end_timestamp))
-                    .push_bind(to_datetime(req.timestamp));
+                    .push_bind(determine_timestamp(req.epoch_start_timestamp))
+                    .push_bind(determine_timestamp(req.epoch_end_timestamp))
+                    .push_bind(determine_timestamp(req.timestamp));
                 
             })
             .build()
@@ -94,3 +94,4 @@ impl Insertable for Vec<RadioUsageStatsIngestReportV1> {
         Ok(())
     }
 }
+

@@ -11,15 +11,31 @@ pub mod reward_analyzer;
 pub struct DbArgs {
     #[arg(short, long)]
     db_url: String,
+    #[arg(long)]
+    schema: Option<String>,
 }
 
 impl DbArgs {
     pub async fn connect(&self) -> anyhow::Result<Pool<Postgres>> {
-        PgPoolOptions::new()
+        let schema = self.schema.clone();
+        let pool = PgPoolOptions::new()
             .max_connections(1)
+            .before_acquire(move |conn, _meta| {
+                let schema = schema.clone();
+                Box::pin(async move {
+                    if let Some(schema) = schema {
+                        sqlx::query(&format!("SET search_path TO {schema}"))
+                            .execute(conn)
+                            .await?;
+                    }
+
+                    Ok(true)
+                })
+            })
             .connect(&self.db_url)
-            .await
-            .map_err(anyhow::Error::from)
+            .await?;
+
+        Ok(pool)
     }
 }
 
