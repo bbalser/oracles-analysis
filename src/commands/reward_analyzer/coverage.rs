@@ -37,7 +37,6 @@ pub async fn load_coverage_map(
                             CoverageObject {
                                 indoor: rc.indoor,
                                 hotspot_key: rc.hotspot_key.into(),
-                                cbsd_id: None,
                                 seniority_timestamp: rc.seniority_ts,
                                 coverage: vec![UnrankedCoverage {
                                     location: rc.hex,

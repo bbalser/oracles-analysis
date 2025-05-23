@@ -1,11 +1,12 @@
 use chrono::{DateTime, Utc};
-use file_store::{heartbeat::cli::ValidatedHeartbeat, traits::MsgDecode, BytesMutStream, FileType};
+use file_store::{BytesMutStream, FileType};
 use futures::TryStreamExt;
 use helium_crypto::PublicKey;
+use helium_proto::{services::poc_mobile::Heartbeat, Message};
 use sqlx::{Pool, Postgres, QueryBuilder};
 use uuid::Uuid;
 
-use crate::{DbTable, Decode, Insertable, ToPrefix};
+use crate::{determine_timestamp, DbTable, Decode, Insertable, ToPrefix};
 
 #[derive(Debug, Clone)]
 pub struct FileTypeValidatedHeartbeat {}
@@ -15,9 +16,7 @@ impl Decode for FileTypeValidatedHeartbeat {
     async fn decode(&self, stream: BytesMutStream) -> anyhow::Result<Box<dyn Insertable>> {
         let reports = stream
             .map_err(anyhow::Error::from)
-            .and_then(
-                |buf| async move { ValidatedHeartbeat::decode(buf).map_err(anyhow::Error::from) },
-            )
+            .and_then(|buf| async move { Heartbeat::decode(buf).map_err(anyhow::Error::from) })
             .try_collect::<Vec<_>>()
             .await?;
 
@@ -60,7 +59,7 @@ impl DbTable for FileTypeValidatedHeartbeat {
 }
 
 #[async_trait::async_trait]
-impl Insertable for Vec<ValidatedHeartbeat> {
+impl Insertable for Vec<Heartbeat> {
     async fn insert(
         &self,
         pool: &Pool<Postgres>,
@@ -75,11 +74,11 @@ impl Insertable for Vec<ValidatedHeartbeat> {
                 b.push_bind(PublicKey::try_from(hb.pub_key.clone()).unwrap().to_string())
                     .push_bind(&hb.cbsd_id)
                     .push_bind(0)
-                    .push_bind(hb.cell_type.as_str_name())
-                    .push_bind(hb.validity.as_str_name())
-                    .push_bind(hb.location_validation_timestamp)
+                    .push_bind(hb.cell_type().as_str_name())
+                    .push_bind(hb.validity().as_str_name())
+                    .push_bind(determine_timestamp(hb.location_validation_timestamp))
                     .push_bind(hb.distance_to_asserted as i64)
-                    .push_bind(hb.timestamp)
+                    .push_bind(determine_timestamp(hb.timestamp))
                     .push_bind(hb.location_trust_score_multiplier as i64)
                     .push_bind(hb.lat)
                     .push_bind(hb.lon)

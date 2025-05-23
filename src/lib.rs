@@ -1,5 +1,4 @@
 use boosted_hex_update::FileTypeBoostedHexUpdate;
-use cbrs_heartbeat_ingest::FileTypeCbrsHeartbeatIngestReport;
 use cell_speedtest_ingest::FileTypeCellSpeedtestIngestReport;
 use chrono::{DateTime, TimeZone, Utc};
 use clap::ValueEnum;
@@ -15,14 +14,15 @@ use reward_manifest::FileTypeRewardManifest;
 use seniority_update::FileTypeSeniorityUpdate;
 use service_provider_bans::FileTypeServiceProviderBan;
 use sqlx::{Pool, Postgres};
+use subscriber_mapping_activity_ingest::FileTypeSubscriberMappingActivityIngest;
 use valid_data_transfer_session::FileTypeValidDataTransferSession;
 // use validated_event_req_v1::FileTypeValidatedEventReq;
 use validated_heartbeat::FileTypeValidatedHeartbeat;
 use verified_data_transfer_ingest::FileTypeVerifiedDataTransferIngest;
+use verified_subscriber_mapping_activity::FileTypeVerifiedSubscriberMappingActivityReport;
 use wifi_heartbeat_ingest_report::FileTypeWifiHeartbeatIngestReport;
 
 mod boosted_hex_update;
-mod cbrs_heartbeat_ingest;
 mod cell_speedtest_ingest;
 pub mod commands;
 mod coverage_object;
@@ -35,7 +35,9 @@ mod radio_usage_stats_ingest_report;
 mod reward_manifest;
 mod seniority_update;
 mod service_provider_bans;
+mod subscriber_mapping_activity_ingest;
 mod valid_data_transfer_session;
+mod verified_subscriber_mapping_activity;
 // mod validated_event_req_v1;
 mod validated_heartbeat;
 mod verified_data_transfer_ingest;
@@ -44,7 +46,6 @@ mod wifi_heartbeat_ingest_report;
 #[derive(Debug, Clone, ValueEnum)]
 pub enum SupportedFileTypes {
     BoostedHexUpdate,
-    CbrsHeartbeatIngestReport,
     CellSpeedtestIngestReport,
     CoverageObject,
     DataTransferSessionIngestReport,
@@ -56,12 +57,14 @@ pub enum SupportedFileTypes {
     InvalidatedRadioThreshold,
     SeniorityUpdate,
     ServiceProviderBans,
+    SubscriberMappingActivityIngest,
     ValidatedHeartbeat,
     ValidDataTransferSession,
     // ValidatedEventReq,
     VerifiedDataTransferIngest,
     WifiHeartbeatIngestReport,
     RewardManifest,
+    VerifiedSubscriberMappingActivityReport,
 }
 
 trait SupportedFileTypeTrait: Decode + ToPrefix + DbTable {}
@@ -71,9 +74,6 @@ impl SupportedFileTypes {
     fn inner(&self) -> Box<dyn SupportedFileTypeTrait> {
         match self {
             SupportedFileTypes::BoostedHexUpdate => Box::new(FileTypeBoostedHexUpdate {}),
-            SupportedFileTypes::CbrsHeartbeatIngestReport => {
-                Box::new(FileTypeCbrsHeartbeatIngestReport {})
-            }
             SupportedFileTypes::CellSpeedtestIngestReport => {
                 Box::new(FileTypeCellSpeedtestIngestReport {})
             }
@@ -94,6 +94,9 @@ impl SupportedFileTypes {
             SupportedFileTypes::RewardManifest => Box::new(FileTypeRewardManifest),
             SupportedFileTypes::SeniorityUpdate => Box::new(FileTypeSeniorityUpdate),
             SupportedFileTypes::ServiceProviderBans => Box::new(FileTypeServiceProviderBan),
+            SupportedFileTypes::SubscriberMappingActivityIngest => {
+                Box::new(FileTypeSubscriberMappingActivityIngest)
+            }
             SupportedFileTypes::ValidDataTransferSession => {
                 Box::new(FileTypeValidDataTransferSession)
             }
@@ -101,6 +104,9 @@ impl SupportedFileTypes {
             // SupportedFileTypes::ValidatedEventReq => Box::new(FileTypeValidatedEventReq),
             SupportedFileTypes::VerifiedDataTransferIngest => {
                 Box::new(FileTypeVerifiedDataTransferIngest)
+            }
+            SupportedFileTypes::VerifiedSubscriberMappingActivityReport => {
+                Box::new(FileTypeVerifiedSubscriberMappingActivityReport)
             }
             SupportedFileTypes::WifiHeartbeatIngestReport => {
                 Box::new(FileTypeWifiHeartbeatIngestReport {})
